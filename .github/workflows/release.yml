@@ -1,0 +1,56 @@
+# Builds the thing a player actually downloads: a self-contained Windows app image (our jar, a
+# trimmed Java runtime and a native launcher), zipped, with a checksum beside it.
+#
+# Runs on a v* tag. The release is left as a DRAFT on purpose - download it, run it once, then
+# publish it by hand. Nobody should find out from a player that the artifact was broken.
+name: release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    permissions:
+      contents: write # to create the release
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25' # the toolchain is pinned to 25 and never downloads one
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Derive the version from the tag
+        id: version
+        shell: pwsh
+        run: |
+          $v = "${{ github.ref_name }}" -replace '^v', ''
+          if ($v -notmatch '^\d+(\.\d+)*$') { $v = '0.0.0' } # jpackage insists on a numeric version
+          "value=$v" >> $env:GITHUB_OUTPUT
+
+      - name: Build and test
+        run: .\gradlew.bat build --console=plain "-PappVersion=${{ steps.version.outputs.value }}"
+
+      - name: Package the portable app image
+        run: .\gradlew.bat releaseZip --console=plain "-PappVersion=${{ steps.version.outputs.value }}"
+
+      - name: Checksum
+        shell: pwsh
+        run: |
+          Get-ChildItem build\release\*.zip | ForEach-Object {
+            $hash = (Get-FileHash $_.FullName -Algorithm SHA256).Hash
+            "$hash  $($_.Name)" | Out-File "$($_.FullName).sha256" -Encoding ascii
+          }
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          generate_release_notes: true
+          files: |
+            build/release/*.zip
+            build/release/*.sha256

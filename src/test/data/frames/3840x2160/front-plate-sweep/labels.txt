@@ -1,0 +1,11 @@
+# front-plate sweep, plate 4 of 5; states read at 3840x2160 with the validated reader.
+# The same key protocol from a fresh R yields these states at ANY
+# resolution - game state depends on keys, not pixels.
+# protocol: R, A x 2, then one screenshot per D press.
+step-0.png = [3, 1, 2, 0, 3]
+step-1.png = [3, 1, 2, 0, 2]
+step-2.png = [3, 1, 2, 0, 1]
+step-3.png = [3, 1, 2, 0, 0]
+step-4.png = [3, 1, 2, 0, -1]
+step-5.png = [3, 1, 2, 0, -2]
+step-6.png = [3, 1, 2, 0, -3]
