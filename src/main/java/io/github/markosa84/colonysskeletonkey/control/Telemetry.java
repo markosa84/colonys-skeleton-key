@@ -1,5 +1,7 @@
 package io.github.markosa84.colonysskeletonkey.control;
 
+import java.util.Locale;
+
 /**
  * Where a session's wall clock actually goes, counted rather than guessed.
  *
@@ -86,7 +88,9 @@ public final class Telemetry {
         }
         long accountedNs = watchNs + counterNs + keyNs;
         long sleepNs = watchNs - readNs;
-        return String.format(
+        // Locale.ROOT: a timing report is diagnostics, and "0.3s" must not become "0,3s" on a
+        // machine whose locale says so - not least because the tests pin this text.
+        return String.format(Locale.ROOT,
                 "  %d slides in %s (%s each). Watching them settle: %s in %d waits"
                         + " (%s each, worst %s).%n"
                         + "  Of that, %d frame reads cost %s (%s each) and %s went to polling"
@@ -98,7 +102,7 @@ public final class Telemetry {
     }
 
     private static String secs(long ns) {
-        return String.format("%.1fs", ns / 1e9);
+        return String.format(Locale.ROOT, "%.1fs", ns / 1e9);
     }
 
     private static String millis(long ns) {

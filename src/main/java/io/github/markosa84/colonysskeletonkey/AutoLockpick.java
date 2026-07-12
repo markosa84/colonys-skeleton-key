@@ -3,6 +3,8 @@ package io.github.markosa84.colonysskeletonkey;
 import java.awt.Dimension;
 import java.awt.Robot;
 import java.awt.Toolkit;
+import java.util.function.IntPredicate;
+import java.util.function.Supplier;
 
 import io.github.markosa84.colonysskeletonkey.control.KeySender;
 import io.github.markosa84.colonysskeletonkey.control.RobotKeyboard;
@@ -39,22 +41,12 @@ public final class AutoLockpick {
     /** Poll interval for the hotkey loop. */
     private static final int POLL_MS = 30;
 
-    /**
-     * Executable that must own the focused window before a single key is sent. Matched
-     * case-insensitively against the file name. Override with {@code -Dgame.process=...} or the first
-     * CLI arg.
-     *
-     * <p>The gate keys on the <b>process</b>, not the window title. Titles are not safe: a Chrome tab
-     * reading "BP Mod Loader and Console Enabler at Gothic 1 Remake Nexus" contains any sensible title
-     * substring, and focusing it would have typed {@code W/A/S/D} into the browser. This gate is the
-     * only thing keeping stray keys out of other windows.
-     */
-    private static String gameProcess = System.getProperty("game.process", "G1R-Win64-Shipping.exe");
+    /** Executable that owns the focused window when the game is in front. */
+    private static final String DEFAULT_GAME_PROCESS = "G1R-Win64-Shipping.exe";
 
     public static void main(String[] args) throws Exception {
-        if (args.length > 0 && !args[0].isBlank()) {
-            gameProcess = args[0];
-        }
+        String gameProcess = resolveGameProcess(args);
+
         // Must precede any AWT use so screen capture yields true device pixels.
         Win32.setProcessDpiAware();
 
@@ -73,42 +65,66 @@ public final class AutoLockpick {
         Slider slider = new Slider(new LivePoller(screen, reader), keys, Slider.Timing.GAME);
         LockView view = new LiveLockView(screen, reader);
 
-        printBanner(viewport);
+        printBanner(viewport, gameProcess);
 
-        Hotkey f8 = new Hotkey(Win32.VK_F8);
+        Hotkey f8 = new Hotkey(Win32.VK_F8, Win32::isKeyDown);
         while (true) {
             if (f8.pressed()) {
-                run(slider.telemetry(), () -> new LockSession(view, keys, slider).run());
+                run(slider.telemetry(), Win32::foregroundProcessName, gameProcess,
+                        () -> new LockSession(view, keys, slider).run());
             }
             Thread.sleep(POLL_MS);
         }
     }
 
+    /**
+     * The executable that must own the focused window before a single key is sent, matched
+     * case-insensitively against the file name: the first CLI argument, else
+     * {@code -Dgame.process=...}, else the game's own.
+     *
+     * <p>The gate keys on the <b>process</b>, not the window title. Titles are not safe: a Chrome tab
+     * reading "BP Mod Loader and Console Enabler at Gothic 1 Remake Nexus" contains any sensible title
+     * substring, and focusing it would have typed {@code W/A/S/D} into the browser. This gate is the
+     * only thing keeping stray keys out of other windows.
+     */
+    static String resolveGameProcess(String[] args) {
+        if (args.length > 0 && !args[0].isBlank()) {
+            return args[0];
+        }
+        return System.getProperty("game.process", DEFAULT_GAME_PROCESS);
+    }
+
     /** Edge-detects the global hotkey: true only on the poll where it goes from up to down. */
-    private static final class Hotkey {
+    static final class Hotkey {
         private final int vk;
+        private final IntPredicate keyDown;
         private boolean wasDown;
 
-        Hotkey(int vk) {
+        Hotkey(int vk, IntPredicate keyDown) {
             this.vk = vk;
+            this.keyDown = keyDown;
         }
 
         boolean pressed() {
-            boolean down = Win32.isKeyDown(vk);
+            boolean down = keyDown.test(vk);
             boolean edge = down && !wasDown;
             wasDown = down;
             return edge;
         }
     }
 
-    /** Runs a routine, but only while the game is focused, so stray keys never leak elsewhere. */
-    private static void run(Telemetry telemetry, Runnable body) {
-        String focused = Win32.foregroundProcessName();
+    /**
+     * Runs a routine, but only while the game is focused, so stray keys never leak elsewhere.
+     * Returns whether the body ran at all.
+     */
+    static boolean run(Telemetry telemetry, Supplier<String> foreground, String gameProcess,
+            Runnable body) {
+        String focused = foreground.get();
         if (!focused.equalsIgnoreCase(gameProcess)) {
             System.out.println("[F8] Ignored: the focused window belongs to "
                     + (focused.isEmpty() ? "an unknown process" : focused)
                     + ", not " + gameProcess + ".");
-            return;
+            return false;
         }
         System.out.println("[F8] Learning the open lock, then solving it...");
         telemetry.reset(); // each press reports its own run
@@ -118,7 +134,7 @@ public final class AutoLockpick {
         } catch (RobotKeyboard.FocusLost e) {
             System.out.println("[F8] Aborted: " + e.getMessage()
                     + ". Refocus the game and press F8 again.");
-            return;
+            return true;
         }
         long elapsed = System.nanoTime() - t0;
         System.out.printf("[F8] Done in %.1fs.%n", elapsed / 1e9);
@@ -126,9 +142,10 @@ public final class AutoLockpick {
         if (!breakdown.isEmpty()) {
             System.out.println(breakdown);
         }
+        return true;
     }
 
-    private static void printBanner(Viewport viewport) {
+    static void printBanner(Viewport viewport, String gameProcess) {
         System.out.println("=== The Colony's Skeleton Key ===");
         System.out.println("Nothing to configure: broken picks are read off the lockpick counter, so "
                 + "the tool works at any lockpicking skill and notices if you train it.");

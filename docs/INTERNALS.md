@@ -54,9 +54,11 @@ connections, leaving nothing to trade — and that agreement is now a regression
 ./gradlew build          # Windows: .\gradlew.bat build
 ```
 
-`build` runs the whole JUnit 5 suite (`./gradlew test`). Most of it runs anywhere: the solver's
-optimality proofs, the session driven against a simulated game with the real strain/break/reset
-rules, the executor's outcome classification, the capture-box geometry.
+`build` runs the whole JUnit 6 suite (`./gradlew test`) and a coverage gate with it. Most of it runs
+anywhere: the solver's optimality proofs, the session driven against a simulated game with the real
+strain/break/reset rules, the executor's outcome classification, the capture-box geometry. Nothing
+in it needs the game, a screen or a keyboard — even the screen capture and the key taps are tested,
+through the seams that stand in for `java.awt.Robot` (which cannot exist in a headless JVM).
 
 **The screen reader's regression gates run too**, against the labelled frames in
 [`src/test/data/frames`](../src/test/data/frames/README.md) — the reader's whole calibration: a

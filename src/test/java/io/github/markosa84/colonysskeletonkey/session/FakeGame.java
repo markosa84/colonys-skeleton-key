@@ -31,6 +31,19 @@ final class FakeGame implements LockView, MoveExecutor, CursorKeys {
     /** Play number (1-based) at which one legal move is falsely reported as a strain, or -1. */
     int lieAtPlay = -1;
 
+    /**
+     * Play number (1-based) whose frame cannot be read at all, or -1. The move still <b>lands</b> -
+     * the game does not care that we failed to look at it - which is exactly how a live misread
+     * behaves.
+     */
+    int unreadableAtPlay = -1;
+
+    /**
+     * When set, the frame after the move that opens the lock is unreadable: the minigame is closing
+     * and there is nothing left on screen to read. The pins are still the truth.
+     */
+    boolean unreadableOnceOpen;
+
     /** While {@code hideWhen} matches the true state, plate {@code hiddenPlate} reads UNKNOWN. */
     int hiddenPlate = -1;
     java.util.function.Predicate<int[]> hideWhen = s -> false;
@@ -79,6 +92,9 @@ final class FakeGame implements LockView, MoveExecutor, CursorKeys {
         int[] next = LockSolver.applyMove(truth, state, move.plate(), move.dir());
         if (next != null) {
             state = next;
+            if (plays == unreadableAtPlay || (unreadableOnceOpen && LockSolver.isGoal(state))) {
+                throw new UnreadableFrame(); // the move landed; the frame after it did not read
+            }
             return new Observation(Outcome.MOVED, mask(state), false);
         }
         strains++;

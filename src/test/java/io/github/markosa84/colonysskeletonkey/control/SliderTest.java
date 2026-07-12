@@ -14,6 +14,7 @@ import io.github.markosa84.colonysskeletonkey.solver.Move;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -178,6 +179,7 @@ class SliderTest {
 
         slider.play(2, new int[] {0, 0}, new Move(0, +1));
 
+        assertSame(telemetry, slider.telemetry(), "AutoLockpick reports off this very instance");
         assertEquals(1, telemetry.slides());
         assertTrue(telemetry.summary(1_000_000_000L).contains("1 slides"));
 

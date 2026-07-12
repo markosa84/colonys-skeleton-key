@@ -3,8 +3,15 @@
 Build, run and architecture live in `CLAUDE.md`. Code-level gotchas live in
 `src/main/java/AGENTS.md`. This file is about the *workflow* — the things that cost time.
 
-- **The automated check is `gradlew test`** (JUnit 5; 116 tests including the 34/34 screen-reader
-  gate; no game, no display). `gradlew build` wires it into `check`.
+- **The automated check is `gradlew test`** (JUnit 6; 476 tests, including the screen-reader gate over
+  all 217 labelled frames; no game, no display). `gradlew build` wires it into `check`, **and with it
+  a JaCoCo coverage gate** (≥92% line, ≥90% branch, `win32` excluded). A change that stops testing
+  something fails the build — raise the floor when coverage rises, never lower it to fit a change.
+
+- **Everything is testable headless; nothing needs the game.** The `Robot` cannot exist in a headless
+  JVM, so it hides behind seams (`ScreenGrabber`, `RobotKeyboard.Taps`, `Slider.Ticks`) — see
+  CLAUDE.md "Testing seams". Reach for those before you conclude something "can only be checked
+  live", and prefer `Slider.Ticks` to inventing another near-zero `Timing`.
 
 - **Throwaway harnesses go in the scratchpad, not the repo.** The public API covers driving the
   tool (`LockSession`, `Slider`, `LockReader`, `GameScreen` are public); a harness that needs

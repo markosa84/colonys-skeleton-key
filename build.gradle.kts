@@ -1,5 +1,6 @@
 plugins {
     application
+    jacoco
 }
 
 // Releases pass -PappVersion=1.2.3 (the git tag, minus the "v"). jpackage insists on a numeric
@@ -19,7 +20,7 @@ repositories {
 }
 
 dependencies {
-    testImplementation(platform("org.junit:junit-bom:5.14.4"))
+    testImplementation(platform("org.junit:junit-bom:6.1.1"))
     testImplementation("org.junit.jupiter:junit-jupiter")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
@@ -72,6 +73,77 @@ tasks.test {
     testLogging {
         events("skipped", "failed")
     }
+    finalizedBy(tasks.jacocoTestReport)
+}
+
+/**
+ * Coverage. 0.8.14 is the first JaCoCo that reads Java 25 bytecode (class file major 69); an older
+ * one does not fail politely, it fails on the first class it instruments.
+ *
+ * <p>The agent runs at test time and ships with nothing: the app still has zero dependencies.
+ */
+jacoco {
+    toolVersion = "0.8.14"
+}
+
+/**
+ * `win32` is the one package coverage does not apply to. It is the FFM boundary - six downcalls into
+ * user32.dll and kernel32.dll - so a test of it would be a test of Windows, not of this project. It
+ * is excluded from the report as well as the gate, so that what is measured and what is enforced are
+ * the same thing.
+ */
+val coverageExclusions = listOf("**/win32/**")
+
+/** The classes coverage is judged on: everything compiled, minus the exclusions above. */
+fun JacocoReportBase.onlyTestableClasses() {
+    classDirectories.setFrom(files(classDirectories.files.map {
+        fileTree(it) { exclude(coverageExclusions) }
+    }))
+}
+
+tasks.jacocoTestReport {
+    dependsOn(tasks.test)
+    onlyTestableClasses()
+    reports {
+        html.required = true
+        xml.required = true
+    }
+}
+
+/**
+ * The gate, wired into `check`. It is a ratchet, not an aspiration: the thresholds sit just under
+ * what the suite actually reaches (95.8% line / 93.8% branch), so a change that stops testing
+ * something fails the build - while a gate nobody can pass would only teach everyone to ignore it.
+ *
+ * The few percent that stay missing are the code a headless test JVM cannot reach:
+ *
+ *  - `AutoLockpick.main` owns a `Robot`, a `Toolkit` and an endless loop. Everything it *decides* -
+ *    the hotkey edge, the focus gate, the banner - was lifted out of it and is covered.
+ *  - The `Robot`-backed halves of the seams (`RobotKeyboard`'s taps, `GameScreen`'s grabber) are
+ *    pure delegation to a `Robot` that cannot even be constructed headless. What they delegate to is
+ *    covered through the seam.
+ */
+tasks.jacocoTestCoverageVerification {
+    dependsOn(tasks.test)
+    onlyTestableClasses()
+    violationRules {
+        rule {
+            limit {
+                counter = "LINE"
+                value = "COVEREDRATIO"
+                minimum = "0.92".toBigDecimal()
+            }
+            limit {
+                counter = "BRANCH"
+                value = "COVEREDRATIO"
+                minimum = "0.90".toBigDecimal()
+            }
+        }
+    }
+}
+
+tasks.check {
+    dependsOn(tasks.jacocoTestCoverageVerification)
 }
 
 /**

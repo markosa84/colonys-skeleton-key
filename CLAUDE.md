@@ -16,6 +16,24 @@ tool never uses it. The tool must work at any skill level.
 
 All code lives under the base package `io.github.markosa84.colonysskeletonkey`.
 
+## Where a fact belongs
+
+Five files carry prose, and they do not overlap. Put a new finding in exactly one, and fix the
+number in **every** file that repeats it — a stale count in one contradicts a correct one in another,
+and both are loaded into the same context.
+
+| File | Holds | Audience |
+| --- | --- | --- |
+| `CLAUDE.md` (this) | build/run, architecture, the measured constants, the dead ends | agents |
+| `AGENTS.md` (root) | *workflow* gotchas — what costs time, what costs the player picks | agents |
+| `src/main/java/AGENTS.md` | code-level notes on the reader/session seams | agents |
+| `docs/INTERNALS.md` | the public deep doc: rules, **"Measured timings"**, geometry, dead ends | **users** |
+| `README.md` | download, run, what it does. No internals. | **users** |
+
+The last two are **published** — write them for a player, not for a maintainer, and keep them free of
+legal hedging about the author's own screenshots. Everything an agent needs to *not repeat a mistake*
+goes in one of the first three.
+
 ## Commands
 
 `javac`/`java`/`gradle` are **not on PATH**. The JDK is Corretto 25 at `$env:JAVA_HOME`
@@ -29,6 +47,11 @@ All code lives under the base package `io.github.markosa84.colonysskeletonkey`.
 # frames, the 21-frame 7-plate census and the 161-frame resolution sweep; no game, no display)
 & .\gradlew.bat test --console=plain
 
+# One class, or one method (a @ParameterizedTest matches by METHOD name, not by its "seed 0"
+# display name). Single-quote the filter in PowerShell, as with any -D/-P arg.
+& .\gradlew.bat test --console=plain --tests '*LockReaderTest'
+& .\gradlew.bat test --console=plain --tests '*LockSolverTest.plansUseTheFewestSlidesPossible'
+
 # Run the automation app. lockpick.bat builds if needed and sets the two required JVM flags;
 # `gradlew run` is equivalent. Optional arg = the game's process name.
 .\lockpick.bat
@@ -41,14 +64,26 @@ All code lives under the base package `io.github.markosa84.colonysskeletonkey`.
 - **`gradlew run` / `lockpick.bat` launch `AutoLockpick`, an infinite global-hotkey loop** — never
   run it in a non-interactive/automated shell; it does not return. Only run it when a human will
   drive the game and press Ctrl-C.
-- The automated gate is **`gradlew test`** (JUnit 5, `junit-bom:5.14.x`, the project's only
-  dependency and test-scoped — the app itself has none). `LockReaderTest` must stay green on
+- The automated gate is **`gradlew test`** (JUnit 6, `junit-bom:6.1.x`, the project's only
+  dependency and test-scoped — the app itself has none; JaCoCo is a build plugin, not a dependency).
+  `LockReaderTest` must stay green on
   **every** frame — the 34-frame census, the `6p-gap-shadow` regression frame, the 21-frame `7p-*`
   census and the 161-frame sweep: every `LockReader` constant is fitted to the frames under
   `src/test/data/frames/`. Those PNGs are deliberately **not classpath resources** (the whole corpus
   would be copied into `build/` every clean build); the test task passes their absolute path as
   `-Dlockpick.frames.dir` and declares them a task input, with a relative fallback for runners
   started in the repo root.
+- **The JUnit 5 → 6 move cost nothing.** The suite only ever used `@Test`, `@BeforeAll`,
+  `@ParameterizedTest` + `@ValueSource`/`@MethodSource`/`@CsvSource`, and the plain `Assertions`,
+  all of which keep their `org.junit.jupiter.*` packages in 6. It was a one-line BOM bump: no source
+  change, 407/407 still green. (JUnit 6's breaking changes — Java 17 baseline, the removed
+  `migrationsupport` module, FastCSV replacing univocity — touch nothing here.)
+- **`gradlew build` also enforces coverage** (`jacocoTestCoverageVerification`, wired into `check`):
+  **≥92% line, ≥90% branch**, currently at 95.8/93.8. `win32` is excluded from the report *and* the
+  gate — it is the FFM boundary, and a test of it would test Windows. What is left uncovered is only
+  what a headless JVM cannot reach: `AutoLockpick.main` (owns a `Robot`, a `Toolkit` and an endless
+  loop) and the `Robot`-backed halves of the seams. **Raise the floor when coverage rises; never
+  lower it to make a change fit.**
 - **The frames are shrunk, and a new one must be too** (`scripts/shrink-frames.ps1`). A full-screen
   4K shot is ~12 MB and the corpus was ~1.1 GB in the tree and as much again in `.git`; almost all
   of it was game scenery the reader never samples. Each frame therefore keeps its **original
@@ -99,10 +134,10 @@ connections and the game's real strain/break/reset rules.
   computed 22 times). Don't put the search back in the inner loop.
 
   **The two have never yet produced a different plan** (checked live on the 5-plate lock and 200
-  random 6-plate starts, and now pinned by `LockSolverTest.keypressAndWallclockAgree`). The slide
+  random 6-plate starts, and now pinned by `LockSolverTest.keypressAndWallclockWeightingsAgree`). The slide
   count is fixed by the connection algebra — you cannot add a redundant slide to save cursor
   travel — so the keypress-optimal plan already uses the fewest slides
-  (`LockSolverTest.plansUseTheFewestSlides` checks against brute-force BFS). **Do not expect
+  (`LockSolverTest.plansUseTheFewestSlidesPossible` checks against brute-force BFS). **Do not expect
   WALLCLOCK to speed anything up**; the real win is F8 not resetting.
 
 - **`vision/`** — everything pixels:
@@ -205,7 +240,32 @@ connections and the game's real strain/break/reset rules.
   app doesn't own; plain `java.awt` can't.
 
 - **`AutoLockpick`** (root) — background console app polling the F8 hotkey; each press builds a
-  fresh `LockSession`; nothing is kept between presses.
+  fresh `LockSession`; nothing is kept between presses. `main` is only the composition root: the
+  hotkey edge (`Hotkey`), the focus gate (`run`), the process resolution (`resolveGameProcess`) and
+  the banner are package-private and tested.
+
+### Testing seams (four, all package-private — use them, don't add a fifth)
+
+`java.awt.Robot` **cannot be constructed, or even subclassed, in a headless JVM**, and the tests are
+headless by design. So the two classes that own a `Robot` hide it behind a one-method interface, and
+their public constructors still take the `Robot` — no call site changed:
+
+- **`vision.ScreenGrabber`** (`grab(Rectangle)`) — behind `GameScreen`. A fake serving a labelled
+  frame is exactly what the live grabber hands over, so the box arithmetic, the canvas compositing,
+  the lockpick-counter hash, `LivePoller` and `LiveLockView` all test headless off real frames.
+- **`control.RobotKeyboard.Taps`** (`press`/`release`/`delay`) — which is how the **focus gate** is
+  pinned: it must throw `FocusLost` *before* a key leaves the process, and it is re-checked on
+  every tap.
+- **`control.Slider.Ticks`** (`nanoTime`/`sleep`) — a virtual clock. This is what lets `SliderTimingTest`
+  exercise the **measured `Timing.GAME`** contract itself (the 300ms settle floor, the 5s break
+  animation, the 12s give-up) in milliseconds of real time instead of twenty seconds. Prefer it to
+  inventing new near-zero timings.
+- **`vision.Captures`** is now an **instance** (`Captures(Path dir, Clock clock)`), so a dump can be
+  written into a `@TempDir` with a predictable name. `LiveLockView` takes one; the no-arg constructor
+  is still `captures/` on the wall clock.
+
+`Telemetry.summary` formats with **`Locale.ROOT`**: it is a diagnostic line, and "0.3s" must not
+become "0,3s" on a machine whose locale says so.
 
 ### Rotation angle (measured — don't re-tune it, and don't call the rows curved)
 
@@ -321,8 +381,9 @@ sequences, with a `readCentered` cross-check), the `6p-gap-shadow` regression fr
 failure dump whose labels the user established by marking every hole), the **21-frame 4K 7-plate
 census** (three sequences, `7p-*`), plus the 161-frame resolution sweep (23 display modes × 7
 states). `CaptureBoxTest` proves the capture box contains everything the reader samples — any plate
-count, any offsets, any viewport — with a safety belt. The full suite is 406 tests across
-solver/vision/control/session.
+count, any offsets, any viewport — with a safety belt. The full suite is **476 tests** across
+solver/vision/control/session and the root, and **every class outside `win32` is covered** (95.8%
+line / 93.8% branch, gated at 92/90 — see "Testing seams" below).
 
 **Verified live** against Gothic 1 Remake (`G1R-Win64-Shipping`):
 
@@ -357,7 +418,7 @@ solver/vision/control/session.
 
 ### Animation timing (measured — do not re-guess these)
 
-Full numbers, method and spread are in `README.md` "Measured timings". The load-bearing facts:
+Full numbers, method and spread are in `docs/INTERNALS.md` "Measured timings". The load-bearing facts:
 
 - **A slide**: plates start moving ~112ms after the key, stop ~207ms, and the reader sees a stable
   correct state by ~269ms. Mid-flight the moving plate reads **`UNKNOWN`** — its holes are between

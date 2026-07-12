@@ -2,8 +2,9 @@
 
 - **`LockReader` has a regression gate — run it after any change:** `gradlew test` (wired into
   `check`/`build`) replays every labelled frame in `src/test/data/frames/` through
-  `LockReaderTest` and must stay at **34/34**. Every constant in the reader is fitted to those
-  frames. To debug offline, `new LockReader(Viewport.REFERENCE)` is safe anywhere: it is pure
+  `LockReaderTest` and must stay green on **every one of the 217** (the 34-frame 4K calibration
+  census, the `6p-gap-shadow` regression frame, the 21-frame 7-plate census, and the 161-frame
+  resolution sweep). Every constant in the reader is fitted to those frames. To debug offline, `new LockReader(Viewport.REFERENCE)` is safe anywhere: it is pure
   image analysis (all Robot captures live in `GameScreen`), so you can feed `ImageIO.read(...)`
   images straight into `detectPlateCount` / `readCentered` / `readState`. Pixel constants in the
   vision classes are 4K reference values mapped through `Viewport` at construction - edit the
@@ -31,15 +32,25 @@
 
 - **The session is fully drivable by fakes.** `LockSession` depends only on the seam interfaces it
   owns (`LockView`, `MoveExecutor`, `CursorKeys`) — see `FakeGame` in the test tree, which simulates
-  a lock with hidden connections and the game's real strain/break/reset rules. Prefer extending that
-  over building a live harness.
+  a lock with hidden connections and the game's real strain/break/reset rules (knobs: `lieAtPlay`,
+  `hiddenPlate`/`hideWhen`, `unreadableAtPlay`, `unreadableOnceOpen`). Prefer extending that over
+  building a live harness.
+
+- **So is everything else — the `Robot` is behind a seam.** `java.awt.Robot` cannot be constructed
+  *or subclassed* in a headless JVM, which is why `GameScreen` takes a `ScreenGrabber` and
+  `RobotKeyboard` a `Taps` (both package-private; the public constructors still take the `Robot`, so
+  no call site changed). A fake `ScreenGrabber` cropping a fixture frame is byte-for-byte what the
+  live grabber returns, so `GameScreen`/`LivePoller`/`LiveLockView` test against real frames.
+  `Slider.Ticks` is the same idea for the clock: a virtual one lets the tests run the **real**
+  `Timing.GAME` (5s break animation, 12s give-up) instantly. Don't add a near-zero `Timing` where a
+  fake clock will do, and don't call something "only checkable live" before checking these.
 
 - **Measure the game's animation, don't guess it.** Measured: plates move 112→207ms after the key,
   stable read at 269ms; the moving plate reads `UNKNOWN` while it travels. Sampling too early turns
   a successful move into a phantom "strain" and corrupts the session's idea of the state. A plate
   that STAYS `UNKNOWN` in a state that stopped changing (~1.5s) is settled with an unresolved
   row - `Slider` returns that state with its `UNKNOWN` entries and the session works around it.
-  Full tables: README "Measured timings".
+  Full tables: `docs/INTERNALS.md` "Measured timings".
 
 - **A strain does not block input; a pick *break* does.** A legal slide sent 0ms after a rejected move
   still lands, and the shake is invisible to the reader (no `UNKNOWN`, no offset change). Only the
@@ -49,7 +60,8 @@
   `GameScreen.captureLock()`, which grabs the lock's 1300x1120 box (sized with a safety belt;
   `CaptureBoxTest` proves it contains everything the reader samples at every viewport) and
   composites it into a *reused* full-frame canvas so the reader's absolute coordinates still land.
-  Never `Captures.save()` that image: every pixel outside the box is stale.
+  Never dump that image through `Captures`: every pixel outside the box is stale. (`LiveLockView`
+  saves the full `capture()` for exactly this reason, and a test pins it.)
 
 - **A row that fails to read in a settled frame is a reader bug to fix, not a fact of the lock.**
   The one live case (a difficulty-4 chest) was an arch-gap shadow the old walk mistook for a

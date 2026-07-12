@@ -27,15 +27,52 @@ public final class RobotKeyboard implements Keyboard {
         }
     }
 
+    /**
+     * The three calls a tap makes on the {@code Robot}. It is a seam only because {@code Robot}
+     * cannot be constructed in a headless JVM, so the tests - which are headless - could otherwise
+     * not reach the one thing in this class worth pinning: that the focus gate fires <i>before</i>
+     * any key leaves the process.
+     */
+    interface Taps {
+        void press(int vk);
+
+        void release(int vk);
+
+        void delay(int ms);
+    }
+
     static final int HOLD_MS = 5;
     static final int GAP_MS = 5;
 
-    private final Robot robot;
+    private final Taps taps;
     private final BooleanSupplier gameFocused;
 
     public RobotKeyboard(Robot robot, BooleanSupplier gameFocused) {
-        this.robot = robot;
+        this(robotTaps(robot), gameFocused);
+    }
+
+    RobotKeyboard(Taps taps, BooleanSupplier gameFocused) {
+        this.taps = taps;
         this.gameFocused = gameFocused;
+    }
+
+    private static Taps robotTaps(Robot robot) {
+        return new Taps() {
+            @Override
+            public void press(int vk) {
+                robot.keyPress(vk);
+            }
+
+            @Override
+            public void release(int vk) {
+                robot.keyRelease(vk);
+            }
+
+            @Override
+            public void delay(int ms) {
+                robot.delay(ms);
+            }
+        };
     }
 
     @Override
@@ -43,9 +80,9 @@ public final class RobotKeyboard implements Keyboard {
         if (!gameFocused.getAsBoolean()) {
             throw new FocusLost("the game lost the foreground mid-run");
         }
-        robot.keyPress(vk);
-        robot.delay(HOLD_MS);
-        robot.keyRelease(vk);
-        robot.delay(GAP_MS);
+        taps.press(vk);
+        taps.delay(HOLD_MS);
+        taps.release(vk);
+        taps.delay(GAP_MS);
     }
 }

@@ -1,6 +1,7 @@
 package io.github.markosa84.colonysskeletonkey.solver;
 
 import java.util.ArrayDeque;
+import java.util.Arrays;
 import java.util.Deque;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -156,6 +157,52 @@ class LockSolverTest {
     void isGoalIsAllZeros() {
         assertTrue(LockSolver.isGoal(new int[] {0, 0, 0}));
         assertFalse(LockSolver.isGoal(new int[] {0, -1, 0}));
+    }
+
+    /** A lock that is already open needs no keys at all - not one redundant slide. */
+    @Test
+    void anAlreadyOpenLockSolvesToAnEmptyPlan() {
+        LockModel m = sixPlateExample();
+
+        List<Move> plan = LockSolver.solve(m, new int[] {0, 0, 0, 0, 0, 0}, 5, Cost.WALLCLOCK);
+
+        assertNotNull(plan);
+        assertTrue(plan.isEmpty());
+    }
+
+    /**
+     * The state key must stay injective at the biggest lock in the game, or the search would treat
+     * two different configurations as the same one and cheerfully skip a state it had never seen.
+     * All 7^7 configurations of a 7-plate lock, no collisions.
+     */
+    @Test
+    void encodeIsUniqueAcrossTheWholeSevenPlateStateSpace() {
+        LockModel m = LockModel.of(new int[7], rows(row(), row(), row(), row(), row(), row(), row()));
+        Set<Long> keys = new HashSet<>();
+        int[] state = new int[7];
+
+        for (int i = 0; i < 823_543; i++) { // 7 plates x 7 positions
+            int rest = i;
+            for (int p = 0; p < 7; p++) {
+                state[p] = rest % 7 - LockModel.MAX_OFFSET;
+                rest /= 7;
+            }
+            assertTrue(keys.add(LockSolver.encode(m, state)), "collision at " + Arrays.toString(state));
+        }
+
+        assertEquals(823_543, keys.size());
+    }
+
+    /** The live 7-plate chest (difficulty 4), with the connections probed off the real game. */
+    @Test
+    void solvesTheLiveSevenPlateChest() {
+        LockModel m = LockModel.of(new int[] {0, -2, -3, 3, 3, 2, 3},
+                rows(row(n(4)), row(), row(), row(n(1), n(4)), row(), row(), row(n(1))));
+
+        List<Move> plan = LockSolver.solve(m);
+
+        assertNotNull(plan, "the chest the tool opened live must be solvable");
+        assertTrue(LockSolver.isGoal(replay(m, m.start(), plan)));
     }
 
     // --- helpers ---

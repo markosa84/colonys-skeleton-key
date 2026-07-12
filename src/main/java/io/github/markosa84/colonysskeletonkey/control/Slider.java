@@ -64,10 +64,38 @@ public final class Slider implements MoveExecutor {
         public static final Timing GAME = new Timing(300, 5000, 12_000, 5, 2, 1500);
     }
 
+    /**
+     * The clock the animation is watched on. Real time in the game; virtual time in the tests,
+     * which is what lets them exercise the measured {@link Timing#GAME} contract itself - a 5s
+     * break animation and a 12s give-up included - instead of near-zero stand-ins.
+     */
+    interface Ticks {
+        long nanoTime();
+
+        void sleep(int ms);
+
+        Ticks SYSTEM = new Ticks() {
+            @Override
+            public long nanoTime() {
+                return System.nanoTime();
+            }
+
+            @Override
+            public void sleep(int ms) {
+                try {
+                    Thread.sleep(ms);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+            }
+        };
+    }
+
     private final LockPoller poller;
     private final KeySender keys;
     private final Timing timing;
     private final Telemetry telemetry;
+    private final Ticks ticks;
     /** Last known lockpick-counter fingerprint, valid while {@link #picksKnown}. */
     private long picks;
     private boolean picksKnown;
@@ -77,10 +105,15 @@ public final class Slider implements MoveExecutor {
     }
 
     public Slider(LockPoller poller, KeySender keys, Timing timing, Telemetry telemetry) {
+        this(poller, keys, timing, telemetry, Ticks.SYSTEM);
+    }
+
+    Slider(LockPoller poller, KeySender keys, Timing timing, Telemetry telemetry, Ticks ticks) {
         this.poller = poller;
         this.keys = keys;
         this.timing = timing;
         this.telemetry = telemetry;
+        this.ticks = ticks;
     }
 
     /** Where this slider's time went. Live-run accounting; the tests ignore it. */
@@ -110,12 +143,12 @@ public final class Slider implements MoveExecutor {
         int dir = move.dir();
         telemetry.countSlide();
         long picksBefore = knownPicks(); // sampled before the key, so a first-move break is seen
-        long navFrom = System.nanoTime();
+        long navFrom = ticks.nanoTime();
         keys.navigateTo(p); // selection changes are instant and never queued behind an animation
-        telemetry.addKeys(System.nanoTime() - navFrom);
-        long pressed = System.nanoTime();
+        telemetry.addKeys(ticks.nanoTime() - navFrom);
+        long pressed = ticks.nanoTime();
         keys.slide(dir);
-        telemetry.addKeys(System.nanoTime() - pressed);
+        telemetry.addKeys(ticks.nanoTime() - pressed);
 
         int[] settled = quiesce(n, pressed, timing.settleMinMs());
         // A legal move shifts the mover by exactly one step and drags nothing further. Anything
@@ -162,8 +195,8 @@ public final class Slider implements MoveExecutor {
      * vanished, which is why a second break appeared to need eight strains rather than six.
      */
     private int[] awaitBreak(int n) {
-        sleep(timing.breakAnimationMs());
-        return quiesce(n, System.nanoTime(), timing.settleMinMs());
+        ticks.sleep(timing.breakAnimationMs());
+        return quiesce(n, ticks.nanoTime(), timing.settleMinMs());
     }
 
     /** Reads a lock that should not be moving, tolerating the tail of an animation. */
@@ -172,7 +205,7 @@ public final class Slider implements MoveExecutor {
         // Time passes here that this slider did not cause - a fresh session, a recovery pause - so
         // whatever it last knew about the lockpick counter is no longer worth trusting.
         picksKnown = false;
-        return quiesce(n, System.nanoTime(), timing.settleMinMs());
+        return quiesce(n, ticks.nanoTime(), timing.settleMinMs());
     }
 
     /**
@@ -201,11 +234,11 @@ public final class Slider implements MoveExecutor {
      * got recorded as a strain.
      */
     private int[] quiesce(int n, long since, int minMs) {
-        long enteredAt = System.nanoTime();
+        long enteredAt = ticks.nanoTime();
         try {
             return watch(n, since, minMs);
         } finally {
-            telemetry.addWatch(System.nanoTime() - enteredAt);
+            telemetry.addWatch(ticks.nanoTime() - enteredAt);
         }
     }
 
@@ -240,27 +273,27 @@ public final class Slider implements MoveExecutor {
                     return state; // settled, with a hidden row - nothing animates this long
                 }
             }
-            sleep(timing.pollMs());
+            ticks.sleep(timing.pollMs());
         }
         throw new UnreadableFrame();
     }
 
     /** One poll: a lock-box grab plus its decode - the unit a run is really built out of. */
     private int[] readLock(int n) {
-        long from = System.nanoTime();
+        long from = ticks.nanoTime();
         try {
             return poller.readLock(n);
         } finally {
-            telemetry.addRead(System.nanoTime() - from);
+            telemetry.addRead(ticks.nanoTime() - from);
         }
     }
 
     private long fingerprint() {
-        long from = System.nanoTime();
+        long from = ticks.nanoTime();
         try {
             return poller.pickFingerprint();
         } finally {
-            telemetry.addCounter(System.nanoTime() - from);
+            telemetry.addCounter(ticks.nanoTime() - from);
         }
     }
 
@@ -288,15 +321,7 @@ public final class Slider implements MoveExecutor {
         return false;
     }
 
-    private static long millisSince(long nanos) {
-        return (System.nanoTime() - nanos) / 1_000_000L;
-    }
-
-    private static void sleep(int ms) {
-        try {
-            Thread.sleep(ms);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-        }
+    private long millisSince(long nanos) {
+        return (ticks.nanoTime() - nanos) / 1_000_000L;
     }
 }

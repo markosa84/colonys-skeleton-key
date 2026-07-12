@@ -61,4 +61,27 @@ class ViewportTest {
         assertThrows(IllegalArgumentException.class, () -> new Viewport(0, 1080));
         assertThrows(IllegalArgumentException.class, () -> new Viewport(1920, -1));
     }
+
+    /**
+     * Blob sizes are pixel counts, so they scale with the <b>square</b> of the linear scale. Getting
+     * this wrong would not fail loudly - it would quietly widen or narrow every pin threshold at
+     * every resolution that is not 4K.
+     */
+    @Test
+    void blobAreasScaleQuadraticallyEvenAtAnAwkwardScale() {
+        Viewport v = new Viewport(1280, 720); // exactly a third of 4K
+        double third = 1.0 / 3.0;
+
+        assertEquals(third, v.scale(), 1e-12);
+        assertEquals(400.0 * third, v.len(400.0), 1e-9, "a distance scales linearly");
+        assertEquals(400.0 * third * third, v.area(400.0), 1e-9, "an area scales quadratically");
+    }
+
+    /** Only 4K is the calibrated resolution; everything else is scaled from it, and says so. */
+    @Test
+    void onlyTheReferenceViewportCallsItselfTheReference() {
+        assertTrue(Viewport.REFERENCE.isReference());
+        assertTrue(new Viewport(3840, 2160).isReference(), "it is a value, not an identity");
+        assertFalse(new Viewport(1920, 1080).isReference());
+    }
 }

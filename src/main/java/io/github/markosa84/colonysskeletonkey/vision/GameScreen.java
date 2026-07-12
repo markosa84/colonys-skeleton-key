@@ -42,7 +42,7 @@ public final class GameScreen {
     /** Digits are near-black; the box behind them is near-white. Anything in between is the border. */
     private static final int PICKS_DARK_MAX = 110;
 
-    private final Robot robot;
+    private final ScreenGrabber grabber;
     private final Viewport viewport;
     private final Rectangle lockBox;
     private final Rectangle picksBox;
@@ -51,7 +51,12 @@ public final class GameScreen {
     private Graphics2D canvasGraphics;
 
     public GameScreen(Robot robot, Viewport viewport) {
-        this.robot = robot;
+        this(robot::createScreenCapture, viewport);
+    }
+
+    /** Over a {@link ScreenGrabber}: what the headless tests build, with a frame standing in. */
+    GameScreen(ScreenGrabber grabber, Viewport viewport) {
+        this.grabber = grabber;
         this.viewport = viewport;
         this.lockBox = lockBox(viewport);
         this.picksBox = box(viewport, PICKS_X0, PICKS_Y0, PICKS_W, PICKS_H);
@@ -70,7 +75,7 @@ public final class GameScreen {
 
     /** Grabs a full-screen screenshot. Use it to save evidence; use {@link #captureLock} to poll. */
     public BufferedImage capture() {
-        return robot.createScreenCapture(new Rectangle(0, 0, viewport.width(), viewport.height()));
+        return grabber.grab(new Rectangle(0, 0, viewport.width(), viewport.height()));
     }
 
     /**
@@ -84,7 +89,7 @@ public final class GameScreen {
                     BufferedImage.TYPE_INT_RGB);
             canvasGraphics = canvas.createGraphics();
         }
-        canvasGraphics.drawImage(robot.createScreenCapture(lockBox), lockBox.x, lockBox.y, null);
+        canvasGraphics.drawImage(grabber.grab(lockBox), lockBox.x, lockBox.y, null);
         return canvas;
     }
 
@@ -97,7 +102,7 @@ public final class GameScreen {
      * untouched. Reading the digits properly would need OCR; noticing that they changed does not.
      */
     public long pickCounterFingerprint() {
-        BufferedImage box = robot.createScreenCapture(picksBox);
+        BufferedImage box = grabber.grab(picksBox);
         long hash = 0xcbf29ce484222325L; // FNV-1a over the thresholded glyph pixels
         for (int y = 0; y < box.getHeight(); y++) {
             for (int x = 0; x < box.getWidth(); x++) {
