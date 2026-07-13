@@ -61,6 +61,11 @@ goes in one of the first three.
 & .\gradlew.bat releaseZip --console=plain '-PappVersion=1.0.0'
 ```
 
+- **`-PappVersion` is not yours to choose.** In a release it comes from **release-please**, which
+  derives it from the conventional commits and owns `version.txt` and `.release-please-manifest.json`
+  — never hand-edit those, and never tag by hand. Pass any numeric value locally; it only names the
+  zip. AGENTS.md, "Commit messages are load-bearing", has the rules and the release flow.
+
 - **`gradlew run` / `lockpick.bat` launch `AutoLockpick`, an infinite global-hotkey loop** — never
   run it in a non-interactive/automated shell; it does not return. Only run it when a human will
   drive the game and press Ctrl-C.

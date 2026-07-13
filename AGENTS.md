@@ -13,6 +13,33 @@ Build, run and architecture live in `CLAUDE.md`. Code-level gotchas live in
   CLAUDE.md "Testing seams". Reach for those before you conclude something "can only be checked
   live", and prefer `Slider.Ticks` to inventing another near-zero `Timing`.
 
+- **Commit messages are load-bearing: they choose the version number.** Releases are cut by
+  **release-please**, which reads the [Conventional Commits](https://www.conventionalcommits.org)
+  since the last release. **Nothing lints this**, so a mistyped prefix does not fail — it silently
+  ships nothing.
+
+  | Prefix | Effect on the next release |
+  | --- | --- |
+  | `feat:` | **minor** bump (1.2.0 → 1.3.0) |
+  | `fix:` / `perf:` | **patch** bump (1.2.0 → 1.2.1) |
+  | `feat!:` / any type + `!`, or a `BREAKING CHANGE:` footer | **major** bump (1.2.0 → 2.0.0) |
+  | `test:` `refactor:` `build:` `docs:` `chore:` | **no release at all** — they appear in the CHANGELOG and wait for the next `feat:`/`fix:` |
+  | anything else (`feats:`, no prefix, "fixed the thing") | **nothing.** Invisible to release-please, invisible in the CHANGELOG |
+
+  So: a bug fix the player can feel is a `fix:`, not a `chore:`. If a release is needed anyway (a
+  rebuild, a packaging change), put a **`Release-As: 1.2.3`** footer in the commit body — that forces
+  exactly that version, once. The scope is optional and free-form (`fix(reader): ...`).
+
+- **How a release actually happens** (never tag by hand; never edit `version.txt` or
+  `.release-please-manifest.json` — release-please owns both):
+  1. Push conventional commits to `main`. release-please opens/updates a **"chore: release X.Y.Z"**
+     PR carrying the CHANGELOG and the version bump. Nothing is released yet.
+  2. **Merging that PR is the decision to release.** It creates a **draft** GitHub release, and the
+     `package` job then runs the full suite and attaches the zip + `.sha256` to it.
+  3. **Download the zip and run the exe once**, then publish the release by hand. CI cannot launch an
+     interactive hotkey app, so that click is the only smoke test the artifact ever gets. A draft has
+     no git tag — the tag appears when you publish.
+
 - **Throwaway harnesses go in the scratchpad, not the repo.** The public API covers driving the
   tool (`LockSession`, `Slider`, `LockReader`, `GameScreen` are public); a harness that needs
   package-private members must declare the same package (e.g.

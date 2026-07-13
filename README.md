@@ -1,5 +1,9 @@
 # The Colony's Skeleton Key
 
+[![ci](https://github.com/markosa84/colonys-skeleton-key/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/markosa84/colonys-skeleton-key/actions/workflows/ci.yml)
+[![release](https://img.shields.io/github/v/release/markosa84/colonys-skeleton-key?display_name=tag&sort=semver&label=release)](https://github.com/markosa84/colonys-skeleton-key/releases/latest)
+[![licence: MIT](https://img.shields.io/github/license/markosa84/colonys-skeleton-key)](LICENSE)
+
 **An automatic lockpicker for the Gothic 1 Remake lockpicking minigame.** Open a lock in the game,
 press **F8**, and watch it open.
 
