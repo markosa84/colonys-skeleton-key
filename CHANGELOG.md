@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.0](https://github.com/markosa84/colonys-skeleton-key/compare/v1.0.0...v1.1.0) (2026-07-13)
+
+
+### Features
+
+* **vision:** read the lock at any in-game gamma, and through the game's own window ([abe6df9](https://github.com/markosa84/colonys-skeleton-key/commit/abe6df9e89237b98d22e131d7ef842b8d675385d))
+
 ## 1.0.0 (2026-07-13)
 
 
