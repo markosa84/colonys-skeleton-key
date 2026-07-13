@@ -36,14 +36,29 @@ Two things Windows will do, because the release is not code-signed (a certificat
 
 ## What it needs from the game
 
-- **Windows**, and the game running **borderless windowed**.
+- **Windows**, and the game running **windowed or borderless**.
 - **F8 unbound** in the game's controls menu. The tool only *observes* the key, so the game receives
   it too — make sure it does not do anything there.
-- Any resolution. The reader is calibrated at 4K and scaled to your screen; it is validated at 23
-  display modes from 800×600 up, across 16:9, 16:10, 4:3 and 5:4.
+- Any resolution, any monitor. Each F8 measures the window the game is drawing into and scales the
+  4K calibration onto it, so it does not matter whether the game fills your screen. The reader is
+  validated at 23 display modes from 800×600 up, across 16:9, 16:10, 4:3 and 5:4.
+- **Any gamma.** Set the slider wherever you like it: each F8 reads the brightness back off the
+  screen and corrects for it. Validated end to end across the whole range, 1.2 to 3.2.
 - The game to be the focused window. **Keys are only ever sent while
   `G1R-Win64-Shipping.exe` owns the focus** — alt-tab away mid-run and the tool aborts rather than
   type `W`/`A`/`S`/`D` into whatever you switched to.
+
+## If it says "No 4-7 plate lock detected"
+
+It saves two files in `captures/`: the frame it was looking at, and a `.txt` beside it saying which
+rectangle it thought it was reading and what it found there. **Open the `.txt`.** If the saved frame
+shows the lock perfectly well, the pixels were fine and the tool was reading the wrong part of them —
+please [open an issue](../../issues) with both files. You can also replay any saved frame yourself,
+without the game running:
+
+```bat
+ColonysSkeletonKey.exe --diagnose captures\no-lock-20260713-103856-180.png
+```
 
 ## What it does, plainly
 

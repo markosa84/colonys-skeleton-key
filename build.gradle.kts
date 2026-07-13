@@ -112,13 +112,15 @@ tasks.jacocoTestReport {
 
 /**
  * The gate, wired into `check`. It is a ratchet, not an aspiration: the thresholds sit just under
- * what the suite actually reaches (95.8% line / 93.8% branch), so a change that stops testing
+ * what the suite actually reaches (94.5% line / 92.7% branch), so a change that stops testing
  * something fails the build - while a gate nobody can pass would only teach everyone to ignore it.
  *
  * The few percent that stay missing are the code a headless test JVM cannot reach:
  *
- *  - `AutoLockpick.main` owns a `Robot`, a `Toolkit` and an endless loop. Everything it *decides* -
- *    the hotkey edge, the focus gate, the banner - was lifted out of it and is covered.
+ *  - `AutoLockpick.main` owns a `Robot`, a `Toolkit` and an endless loop, and its display-owning
+ *    helpers (`awtScale`, `screenSize`, `environment`) throw out of `GraphicsEnvironment` when
+ *    headless. Everything it *decides* - the hotkey edge, the focus gate, which rectangle the game
+ *    is drawing into, the banner - was lifted out of it and is covered.
  *  - The `Robot`-backed halves of the seams (`RobotKeyboard`'s taps, `GameScreen`'s grabber) are
  *    pure delegation to a `Robot` that cannot even be constructed headless. What they delegate to is
  *    covered through the seam.

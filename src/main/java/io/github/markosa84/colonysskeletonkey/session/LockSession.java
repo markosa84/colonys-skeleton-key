@@ -147,10 +147,14 @@ public final class LockSession {
     public void run() {
         n = view.detectPlateCount();
         if (n < LockModel.MIN_PLATES || n > LockModel.MAX_PLATES) {
+            // Not "at 4K": every resolution is supported, and saying otherwise sent one reporter
+            // hunting the wrong problem for a week. When this fires with the lock plainly open on
+            // screen, the frame is fine and the coordinates are not - which is what the dump says.
             System.out.println("No " + LockModel.MIN_PLATES + "-" + LockModel.MAX_PLATES + " plate "
-                    + "lock detected. Is the lock open and focused, at 4K, with the game in the "
-                    + "foreground?");
+                    + "lock detected. Is the lock open, with the game in the foreground?");
             view.dumpFrame("no-lock");
+            System.out.println("If the lock was open and the saved frame looks fine, the tool is "
+                    + "reading the wrong part of it: open the .txt beside it, and please report it.");
             return;
         }
         conn = new Connection[n][];

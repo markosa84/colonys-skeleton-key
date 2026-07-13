@@ -5,6 +5,7 @@ import java.awt.RenderingHints;
 import java.awt.image.BufferedImage;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 
 import io.github.markosa84.colonysskeletonkey.solver.LockModel;
 
@@ -103,6 +104,21 @@ public final class LockReader {
     /** Max distance (px) a detected pin may sit from a plate's fan position to match it. */
     private static final double MATCH_MAX_DIST = 26.0;
 
+    /**
+     * How many blobs beyond the plates themselves a frame may hold before {@link #fanFits} stops
+     * believing what it sees one step past the end of a fan.
+     *
+     * <p>The pin box collects stray warm things - a candle, lit wood - and, at low resolutions, a
+     * single pin breaks into <b>several</b> blobs: at 2048x1536 the {@code CLUSTER_RADIUS} maps to
+     * ~13px while a pin's own warm pixels sit up to 14px apart, so a real 5-plate lock yields
+     * <b>15</b> blobs, one of which lands on a neighbouring fan position. In that frame an "extra
+     * pin one step out" means nothing. In a frame where the blobs are exactly the pins, it means a
+     * plate. Hence the allowance: 2 (so a fan of {@code n} tolerates its own {@code n} pins, the
+     * extension being tested for, and one stray) - clean frames get the check, cluttered ones fall
+     * back to the largest fan that fits, which is what they have always had.
+     */
+    private static final int CLUTTER_ALLOWANCE = 2;
+
     // --- Off-centre offset reading (rotate so hole rows are horizontal, then count dark holes) ---
 
     /**
@@ -194,7 +210,22 @@ public final class LockReader {
     private final double stepMin, stepMax, stepIdeal;
     private final double skipMin, skipMax, skipIdeal;
 
+    /**
+     * The game's gamma, undone on the way in. Every colour and luminance constant above was fitted
+     * at one gamma, and the game's slider spans 1.2-3.2; mapping each pixel back to the calibrated
+     * look is what lets them all keep their meaning. {@link Tone#CALIBRATED} is the identity, so a
+     * reader built without one behaves exactly as it always did - which is what the whole labelled
+     * corpus goes on vouching for. See {@link Tone}.
+     */
+    private final Tone tone;
+
+    /** A reader for frames already at the calibrated gamma - the fixtures, and a 2.7 player. */
     public LockReader(Viewport viewport) {
+        this(viewport, Tone.CALIBRATED);
+    }
+
+    public LockReader(Viewport viewport, Tone tone) {
+        this.tone = tone;
         fanCenterX = viewport.x(FAN_CENTER_X);
         fanCenterY = viewport.y(FAN_CENTER_Y);
         depthStepX = viewport.len(DEPTH_STEP_X);
@@ -280,9 +311,95 @@ public final class LockReader {
     public int detectPlateCount(BufferedImage img) {
         List<Pin> pins = detectPins(img);
         for (int n = LockModel.MAX_PLATES; n >= LockModel.MIN_PLATES; n--) {
-            if (allPositionsCovered(pins, n)) return n;
+            if (fanFits(pins, n)) return n;
         }
         return -1;
+    }
+
+    /**
+     * Why {@link #detectPlateCount} said what it said, in prose - the first thing to look at when a
+     * user reports "no lock detected" over a screenshot that looks perfectly fine.
+     *
+     * <p>It answers the one question that separates the plausible causes, and it now leads with the
+     * {@link Tone} it read, because the two failures look alike from the outside. <b>No warm blobs at
+     * all</b> means the scan box is not over the lock (the viewport describes the wrong rectangle -
+     * the game is not filling the display the tool measured), or the colours moved out from under
+     * {@code isPin}'s gates and the tone did not put them back (HDR, a shader mod - the game's own
+     * gamma slider is handled). <b>Blobs found but no fan fits</b> means they are in the wrong places
+     * relative to each other: the scale is wrong, so the viewport is wrong. <b>Blobs that fit</b> and
+     * the detector is happy, and the fault is elsewhere.
+     */
+    public String describe(BufferedImage img) {
+        StringBuilder out = new StringBuilder();
+        out.append("frame:   ").append(img.getWidth()).append('x').append(img.getHeight())
+                .append("  (the reader expects the game's view, top-left at 0,0)\n");
+        out.append(tone.describe()).append('\n');
+        java.awt.Rectangle box = pinBox();
+        out.append("pin box: ").append(box.x).append(',').append(box.y)
+                .append(" ").append(box.width).append('x').append(box.height)
+                .append("  pin blob size accepted: ").append(Math.round(pinMinPixels))
+                .append("..").append(Math.round(pinMaxPixels)).append("px\n");
+
+        List<Pin> pins = detectPins(img);
+        out.append("pins:    ").append(pins.size()).append(" warm blob(s) of pin size");
+        if (pins.isEmpty()) {
+            out.append("\n  -> Nothing brass-coloured in the box. Either the box is not over the "
+                    + "lock (wrong viewport: is the game really filling this rectangle?), or the "
+                    + "frame's colours are shifted (HDR, gamma, a shader mod).");
+            return out.toString();
+        }
+        out.append('\n');
+        for (Pin p : pins) {
+            out.append(String.format(Locale.ROOT, "  at %.0f,%.0f  %dpx%n", p.x(), p.y(), p.size()));
+        }
+        for (int n = LockModel.MAX_PLATES; n >= LockModel.MIN_PLATES; n--) {
+            out.append(fanReport(pins, n));
+        }
+        int n = detectPlateCount(img);
+        out.append(n < 0
+                ? "  -> No fan fits. Pins are there but not where any 4-7 plate lock puts them: "
+                        + "the scale or the origin is off, so the viewport is wrong."
+                : "  -> " + n + " plates.");
+        return out.toString();
+    }
+
+    /** One line per plate count: which of its fan positions no pin covers, and whether it is the whole fan. */
+    private String fanReport(List<Pin> pins, int n) {
+        boolean[] used = new boolean[pins.size()];
+        List<String> missing = new ArrayList<>();
+        for (int i = 0; i < n; i++) {
+            int j = matchPin(pins, used, n, i);
+            if (j < 0) {
+                double[] want = pinPosition(n, i);
+                missing.add(String.format(Locale.ROOT, "%d(%.0f,%.0f)", i, want[0], want[1]));
+            } else {
+                used[j] = true;
+            }
+        }
+        if (!missing.isEmpty()) {
+            return String.format(Locale.ROOT, "  %d plates: no pin within %dpx of %s%n",
+                    n, Math.round(matchMaxDist), String.join(" ", missing));
+        }
+        StringBuilder sizes = new StringBuilder();
+        for (int i = 0; i < n; i++) {
+            boolean[] fresh = new boolean[pins.size()];
+            int j = matchPin(pins, fresh, n, i);
+            sizes.append(i > 0 ? "," : "").append(j < 0 ? "-" : pins.get(j).size());
+        }
+        String beyond = "";
+        if (n + 2 <= LockModel.MAX_PLATES) {
+            int back = matchPin(pins, used, n, -1);
+            int front = matchPin(pins, used, n, n);
+            if (back >= 0 || front >= 0) {
+                beyond = "  BUT a pin sits one step past the end ("
+                        + (back >= 0 ? pins.get(back).size() + "px behind" : "")
+                        + (back >= 0 && front >= 0 ? ", " : "")
+                        + (front >= 0 ? pins.get(front).size() + "px in front" : "")
+                        + "), so this may be the middle of a " + (n + 2) + "-plate fan";
+            }
+        }
+        return String.format(Locale.ROOT, "  %d plates: every fan position covered [%s]px%s%n",
+                n, sizes, beyond);
     }
 
     /**
@@ -410,7 +527,7 @@ public final class LockReader {
         int[] lum = new int[w * h];
         for (int y = 0; y < h; y++) {
             for (int x = 0; x < w; x++) {
-                int l = luminance(crop.getRGB(x, y));
+                int l = luminance(tone.map(crop.getRGB(x, y)));
                 lum[y * w + x] = l;
                 dark[y * w + x] = l < HOLE_DARK_MAX;
             }
@@ -498,15 +615,38 @@ public final class LockReader {
         return best;
     }
 
-    /** True if every plate position of an {@code n}-plate fan has a distinct pin nearby. */
-    private boolean allPositionsCovered(List<Pin> pins, int n) {
+    /**
+     * True if the pins are exactly an {@code n}-plate fan: every position covered, <b>and no pin
+     * where the next plate out would be</b>.
+     *
+     * <p>That second half is not paranoia, it is the geometry. Plate {@code i} of {@code n} sits at
+     * {@code (mid - i)} depth steps with {@code mid = (n-1)/2}, so the fans of {@code n} and
+     * {@code n+2} share a lattice: a 6-plate lock's pins sit at {@code +-2.5, +-1.5, +-0.5} steps and
+     * therefore <b>always cover a 4-plate fan</b> ({@code +-1.5, +-0.5}) as well; a 7-plate lock
+     * always covers a 5-plate one. {@link #detectPlateCount} disambiguates by taking the largest fan
+     * that fits - which works only while every pin is seen.
+     *
+     * <p>Lose one end pin, and it does not fail: it silently answers the <b>smaller</b> lock. A
+     * 6-plate lock read as 4 plates hands the session a model with the wrong number of plates, and
+     * it drives the wrong plates into walls until the picks run out. That is far worse than "no lock
+     * detected", and a faint pin is exactly what a dark gamma produces - it is how a real reported
+     * frame reads. So a fan with a pin sitting one step past either end is not that fan; it is the
+     * middle of a bigger one, and the honest answer is to find nothing.
+     */
+    private boolean fanFits(List<Pin> pins, int n) {
         boolean[] used = new boolean[pins.size()];
         for (int i = 0; i < n; i++) {
             int j = matchPin(pins, used, n, i);
             if (j < 0) return false;
             used[j] = true;
         }
-        return true;
+        if (n + 2 > LockModel.MAX_PLATES) {
+            return true; // nothing bigger shares this lattice, so there is no ambiguity to resolve
+        }
+        if (pins.size() > n + CLUTTER_ALLOWANCE) {
+            return true;
+        }
+        return matchPin(pins, used, n, -1) < 0 && matchPin(pins, used, n, n) < 0;
     }
 
     /**
@@ -521,7 +661,7 @@ public final class LockReader {
         List<double[]> clusters = new ArrayList<>(); // {x, y, count}
         for (int y = yLo; y < yHi; y++) {
             for (int x = xLo; x < xHi; x++) {
-                if (!isPin(img.getRGB(x, y))) continue;
+                if (!isPin(tone.map(img.getRGB(x, y)))) continue;
                 boolean placed = false;
                 for (double[] c : clusters) {
                     if (Math.hypot(c[0] - x, c[1] - y) <= clusterRadius) {
@@ -544,7 +684,13 @@ public final class LockReader {
         return pins;
     }
 
-    /** Warm brass test: reddish-gold, clearly warmer than neutral metal or dark holes. */
+    /**
+     * Warm brass test: reddish-gold, clearly warmer than neutral metal or dark holes. Absolute
+     * numbers, so the pixel must arrive at the <b>calibrated gamma</b> - {@link #detectPins} maps it
+     * through the {@link Tone} first. Both of these gates fail on a raw frame from the wrong end of
+     * the game's gamma slider ({@code r >= 130} in the dark, {@code b <= 140} in the bright), and
+     * both take the pin blob's <i>size</i> down with them, which is what the pop signal is made of.
+     */
     private static boolean isPin(int argb) {
         int r = (argb >> 16) & 0xFF;
         int g = (argb >> 8) & 0xFF;

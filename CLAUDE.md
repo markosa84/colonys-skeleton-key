@@ -56,6 +56,18 @@ goes in one of the first three.
 # `gradlew run` is equivalent. Optional arg = the game's process name.
 .\lockpick.bat
 
+# Photograph the game's view on F8 and do nothing else - no probing, no keys, no lockpicks spent.
+# This is the shape a bug report should arrive in (frame + sidecar, which now carries the gamma the
+# tool read), and it is how the gamma corpus was captured: walk the lock through a known key protocol
+# by hand, one dump per step, with the tool never touching it.
+.\lockpick.bat --dump
+
+# Replay a user's failure dump through the reader, offline: what it found, and what it made of it.
+# This is the FIRST thing to run on a "no lock detected" report - see the dead ends. The frame is
+# read as the game's whole view, so a dump that reads correctly here proves the pixels were fine
+# and the LIVE viewport was wrong. Works headless; the packaged exe takes the same flag.
+& .\gradlew.bat run --console=plain '--args=--diagnose captures\no-lock-20260713-103856-180.png'
+
 # The release artifact: a self-contained Windows app image (our jar + a trimmed JRE + a native
 # launcher), zipped. A player unzips it and runs the exe - no Java, nothing to configure.
 & .\gradlew.bat releaseZip --console=plain '-PappVersion=1.0.0'
@@ -73,8 +85,8 @@ goes in one of the first three.
   dependency and test-scoped — the app itself has none; JaCoCo is a build plugin, not a dependency).
   `LockReaderTest` must stay green on
   **every** frame — the 34-frame census, the `6p-gap-shadow` regression frame, the 21-frame `7p-*`
-  census and the 161-frame sweep: every `LockReader` constant is fitted to the frames under
-  `src/test/data/frames/`. Those PNGs are deliberately **not classpath resources** (the whole corpus
+  census, the 161-frame resolution sweep and the 27-frame `gamma` corpus: every `LockReader` constant
+  is fitted to the frames under `src/test/data/frames/`. Those PNGs are deliberately **not classpath resources** (the whole corpus
   would be copied into `build/` every clean build); the test task passes their absolute path as
   `-Dlockpick.frames.dir` and declares them a task input, with a relative fallback for runners
   started in the repo root.
@@ -84,11 +96,12 @@ goes in one of the first three.
   change, 407/407 still green. (JUnit 6's breaking changes — Java 17 baseline, the removed
   `migrationsupport` module, FastCSV replacing univocity — touch nothing here.)
 - **`gradlew build` also enforces coverage** (`jacocoTestCoverageVerification`, wired into `check`):
-  **≥92% line, ≥90% branch**, currently at 95.8/93.8. `win32` is excluded from the report *and* the
+  **≥92% line, ≥90% branch**, currently at 94.2/91.4. `win32` is excluded from the report *and* the
   gate — it is the FFM boundary, and a test of it would test Windows. What is left uncovered is only
   what a headless JVM cannot reach: `AutoLockpick.main` (owns a `Robot`, a `Toolkit` and an endless
-  loop) and the `Robot`-backed halves of the seams. **Raise the floor when coverage rises; never
-  lower it to make a change fit.**
+  loop) plus its display-owning helpers (`awtScale`, `screenSize`, `environment` — a headless JVM
+  throws from `GraphicsEnvironment`), and the `Robot`-backed halves of the seams. **Raise the floor
+  when coverage rises; never lower it to make a change fit.**
 - **The frames are shrunk, and a new one must be too** (`scripts/shrink-frames.ps1`). A full-screen
   4K shot is ~12 MB and the corpus was ~1.1 GB in the tree and as much again in `.git`; almost all
   of it was game scenery the reader never samples. Each frame therefore keeps its **original
@@ -108,7 +121,7 @@ goes in one of the first three.
   script and the second working copy are gone. Consequences that still bind: **anything that needs a
   frame goes through `TestFrames`**, and the frame-driven classes **fail** rather than skip when the
   frames are missing — a skip would switch the reader's entire calibration off and still report a
-  green suite. CI therefore runs the real 217-frame gate, which is this project's only verification
+  green suite. CI therefore runs the real 244-frame gate, which is this project's only verification
   on a machine that is not the author's.
 - Toolchain is pinned to Java 25 with `auto-download=false`; the daemon runs on JDK 25 and resolves
   the current JVM, so no toolchain fetch. (Dependency resolution for JUnit did need the network
@@ -146,21 +159,61 @@ connections and the game's real strain/break/reset rules.
   WALLCLOCK to speed anything up**; the real win is F8 not resetting.
 
 - **`vision/`** — everything pixels:
-  - **`Viewport`** — the screen size plus the mapping from the calibrated 4K reference coordinates
-    onto it: an **aspect-fit** (`scale = min(w/3840, h/2160)`, positions anchored to the screen
-    centre; distances scale linearly, blob areas quadratically, luminance thresholds not at all).
-    The game fits its 16:9 view — Hor+ on wider screens, Vert+ on narrower ones; a height-only
-    Hor+ model was tried first and **failed live at 16:10/4:3**, so don't regress to it.
-    `AutoLockpick` detects the real screen size at startup. At `Viewport.REFERENCE` (3840×2160)
-    the mapping is exactly the identity, which is how the 34/34 calibration gate certifies the
-    parameterization itself; the 161-frame `front-plate-sweep` fixtures (one 5-plate lock, all 23
-    dev-machine display modes, 800×600..4K) validate the scaling against real renders.
-  - **`GameScreen`** — the only Robot owner: `capture()` (full frame, ~79ms at 4K — evidence only),
-    `captureLock()` (the lock's 1300×1120 box — a ≥70px safety belt around everything the reader
-    samples, containment proven by `CaptureBoxTest` for every plate count at every viewport —
-    composited into a reused full-frame canvas, ~23ms, the belt enlargement measured cost-free —
-    what polling uses), and `pickCounterFingerprint()` (FNV-1a over the thresholded lockpick
-    counter box).
+  - **`Tone`** — the game's **gamma slider (1.2–3.2)**, measured off the frame and undone. Every
+    colour/luminance gate in `LockReader` is an absolute number fitted at **gamma 2.7**, so both ends
+    of the slider break it, from opposite directions: dark, the brass falls under `isPin`'s `r>=130`
+    and **no fan fits at all** (a real user's bug: "no lock detected" over a screenshot that looks
+    fine); bright, the highlights climb over `b<=140`, the pin blobs shrink (51–103px at 3.2 against
+    a calibrated 150–180), the holes brighten past `HOLE_MAX_MIN_LUM`, and — worst — **no pin reaches
+    `CENTERED_MIN_PIXELS`**, so the pop signal dies and the tool cannot recognise a lock it just
+    solved. The frame is mapped back to the calibrated look and every constant keeps its meaning.
+    - **The probe is the lockpick-counter panel** (`GameScreen.picksBox`): opaque UI at a fixed spot,
+      so the room cannot touch it, but the gamma pass runs over it like everything else. Measured
+      identical across 8 fixtures (4 rooms, 4/5/6/7 plates, different pick counts) **and all 23
+      resolutions down to 800×600**. Two anchors, and they are **complementary** — exactly where one
+      saturates, the other moves:
+
+      | gamma | 1.2 | 1.5 | 1.8 | 2.1 | 2.4 | **2.7** | 3.0 | 3.2 |
+      | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+      | panel ink | **0** | 9 | 24 | 41 | 58 | **74** | 91 | 100 |
+      | panel white | **244** | 253 | 255 | 255 | 255 | 255 | 255 | 255 |
+
+      So: index by ink, except at the bottom of the slider where the ink has crushed to black and the
+      white — just lifted off its clip — indexes instead.
+    - **The curves are measured, never fitted** (`tools/ToneTable.java` regenerates them from the
+      fixtures; don't hand-edit `Tone.FAMILY`). The transform is a plain **per-pixel LUT on the final
+      LDR frame** — verified per channel, inter-quartile spread 0–3 levels — so a LUT inverts it
+      exactly. The calibrated member is the **exact identity**, which is why the whole corpus goes on
+      vouching for every reader constant unchanged.
+    - **Gamma is a session constant** (you cannot move the slider without leaving the minigame), so
+      `AutoLockpick` estimates it **once per F8**, not per poll. `GameScreen` takes it too, because
+      `pickCounterFingerprint` thresholds the same panel — see the dead ends.
+    - It **refuses to guess**: no plausible panel ⇒ the calibrated tone and a loud note (which is also
+      a hint that the *viewport* is wrong, since a wrong one leaves the box black). And a frame whose
+      (ink, white) is **off the family curve** is called out: the slider moves both anchors together,
+      so an off-curve pair means a *second* setting is dimming the picture (`m_ColorBrightnessOffset`,
+      HDR, a display profile). The reporter's frames read ink 13 beside a white of 184, where the
+      family says 254 — still unexplained; see "Remaining".
+  - **`Viewport`** — the rectangle **the game draws into** (origin + size), plus the mapping from the
+    calibrated 4K reference coordinates onto it: an **aspect-fit** (`scale = min(w/3840, h/2160)`,
+    positions anchored to the view's centre; distances scale linearly, blob areas quadratically,
+    luminance thresholds not at all). The game fits its 16:9 view — Hor+ on wider screens, Vert+ on
+    narrower ones; a height-only Hor+ model was tried first and **failed live at 16:10/4:3**, so
+    don't regress to it. `AutoLockpick.resolveViewport` measures the game's window per F8 press (see
+    "Screen capture needs ALL THREE" — measuring the *screen* was a shipped bug). Every mapping here
+    is **view-local**: the origin exists so `GameScreen` can translate a grab onto the desktop, and
+    nothing else in the vision layer knows the window moved. At `Viewport.REFERENCE` (3840×2160 at
+    the desktop origin) the mapping is exactly the identity, which is how the 34/34 calibration gate
+    certifies the parameterization itself; the 161-frame `front-plate-sweep` fixtures (one 5-plate
+    lock, all 23 dev-machine display modes, 800×600..4K) validate the scaling against real renders.
+  - **`GameScreen`** — the only Robot owner, and **the only class that applies the viewport's
+    origin**: it keeps every box twice, view-local (what the reader sees, what the canvas uses) and
+    translated onto the virtual desktop (what the grabber is asked for). `capture()` (the game's
+    whole view, ~79ms at 4K — evidence only), `captureLock()` (the lock's 1300×1120 box — a ≥70px
+    safety belt around everything the reader samples, containment proven by `CaptureBoxTest` for
+    every plate count at every viewport — composited into a reused view-sized canvas, ~23ms, the belt
+    enlargement measured cost-free — what polling uses), and `pickCounterFingerprint()` (FNV-1a over
+    the thresholded lockpick counter box).
   - **`LockReader`** — pure `BufferedImage` analysis, headless-safe (which is why the 34-frame gate
     runs anywhere), from **one frame**:
     - *Plate count.* The minigame frames the lock at a **fixed screen position**, so the reader
@@ -183,10 +236,20 @@ connections and the game's real strain/break/reset rules.
       the hole-bridging double step only when the exact walk doesn't add up to six — a skip that
       overshoots "bridges" a hole that was never missing (the `6p-gap-shadow` fixture pins both
       fixes). Rows that still don't add up read `UNKNOWN` (`LockModel.isComplete`).
+  - **`LockReader.describe`** — the reader's own account of a frame: every warm blob it found in the
+    pin box, and for each `n` in 7..4 which fan positions nothing covered. **This is the first thing
+    to read on a "no lock detected" report.** *No warm blobs* = the scan box is not over the lock
+    (wrong viewport) or the colours moved (HDR/gamma/shader). *Blobs but no fan fits* = wrong scale,
+    so still the viewport. It is what `--diagnose` and the dump sidecar print.
   - **`Captures`** — failure-frame dumps to `captures/<tag>-<timestamp>.png` so a live misread can
-    be replayed offline and folded into the test fixtures.
+    be replayed offline and folded into the test fixtures, **plus a `.txt` sidecar** carrying the
+    viewport, the environment and `describe()`. The frame alone is not evidence: the failure it
+    usually documents leaves a screenshot that looks perfectly normal, because the pixels are fine
+    and the coordinates are not. Ask a reporter for both files.
   - **`LivePoller` / `LiveLockView`** — the live implementations of the `control.LockPoller` and
-    `session.LockView` seams, composing `GameScreen` + `LockReader` (+ `Captures`).
+    `session.LockView` seams, composing `GameScreen` + `LockReader` (+ `Captures`). `LiveLockView`
+    takes a `Supplier<String>` for the environment half of the sidecar — Win32 and the display are
+    `AutoLockpick`'s to know about, not the vision layer's.
 
 - **`control/`** — everything keys:
   - **`KeySender`** — W/S/A/D with a tracked cursor, over the **`Keyboard`** seam
@@ -239,15 +302,31 @@ connections and the game's real strain/break/reset rules.
       game needs more.
 
 - **`win32/Win32`** — Foreign Function & Memory (FFM) bindings into `user32.dll`/`kernel32.dll`:
-  `GetAsyncKeyState` (F8), `SetProcessDPIAware`, and `GetForegroundWindow` +
-  `GetWindowThreadProcessId` + `QueryFullProcessImageNameW` (the focus gate: keys go out only when
-  `G1R-Win64-Shipping.exe` owns the focused window). This is the only way to capture hotkeys the
-  app doesn't own; plain `java.awt` can't.
+  `GetAsyncKeyState` (F8); the DPI calls (below); `GetClientRect` + `ClientToScreen`
+  (`foregroundClientRect` — the rectangle the game actually draws into, which is what the viewport is
+  built from); and `GetForegroundWindow` + `GetWindowThreadProcessId` + `QueryFullProcessImageNameW`
+  (the focus gate: keys go out only when `G1R-Win64-Shipping.exe` owns the focused window). This is
+  the only way to capture hotkeys the app doesn't own; plain `java.awt` can't. The package stays
+  clear of AWT (`Win32.Rect`, not `java.awt.Rectangle`) so nothing in it needs a display to load.
 
-- **`AutoLockpick`** (root) — background console app polling the F8 hotkey; each press builds a
-  fresh `LockSession`; nothing is kept between presses. `main` is only the composition root: the
-  hotkey edge (`Hotkey`), the focus gate (`run`), the process resolution (`resolveGameProcess`) and
-  the banner are package-private and tested.
+  **DPI awareness is observed, not set — and both setters fail, which is fine.** Measured with a
+  scratch probe: the JVM is **already `per-monitor-v2`** before a line of our code runs (`java.exe`'s
+  own manifest declares it), so `SetProcessDpiAwarenessContext(-4)` is *refused* (awareness cannot be
+  set twice) and the legacy `SetProcessDPIAware()` returns TRUE while changing nothing — verified not
+  to downgrade a V2 process. So `setProcessDpiAware()` calls both (a future launcher might declare
+  nothing), then **reads the awareness back** via `GetThreadDpiAwarenessContext` +
+  `AreDpiAwarenessContextsEqual` and returns that. Inferring it from a setter's return value reported
+  "system" for a process that was really per-monitor-v2 — a lie in every bug report. (`GetProcess`​`Dpi`​`AwarenessContext`
+  is *absent* from user32 on the dev machine; use the thread one.) This is the same
+  observe-don't-configure rule as `Skill`.
+
+- **`AutoLockpick`** (root) — background console app polling the F8 hotkey; each press **re-measures
+  the game's window** and builds a fresh `GameScreen`/`LockReader`/`Slider`/`LockSession` from it
+  (the game is normally launched *after* this tool, and a player can change resolution between two
+  locks); nothing is kept between presses but the keyboard. `main` is only the composition root: the
+  hotkey edge (`Hotkey`), the focus gate (`run`), the process resolution (`resolveGameProcess`), the
+  viewport (`resolveViewport`), the DPI self-check (`dpiWarning`), the offline replay (`diagnose`,
+  `--diagnose <png>`) and the banner are package-private and tested.
 
 ### Testing seams (four, all package-private — use them, don't add a fifth)
 
@@ -374,9 +453,28 @@ others silently breaks the automation. `KeySenderTest` and `LockSolverTest` pin 
   for `dir +1` = `A` = LEFT.
 - **Connections are directed per-mover:** `connections[p]` lists what moving `p` drags, each entry a
   `Connection(target, NORMAL|INVERTED)`. No cascade — a dragged plate's own row does not fire.
-- **Screen capture needs BOTH** `Win32.setProcessDpiAware()` (before any AWT init) **and**
-  `-Dsun.java2d.uiScale=1`. The dev display is 4K at 200% scaling; either alone yields a wrong
-  (scaled/black) capture. See `.claude` project memory `screen-capture-dpi` for detail.
+- **The lockpick counter is thresholded, so the gamma reaches the break detector too.**
+  `GameScreen.PICKS_DARK_MAX = 110` splits the digits from the panel behind them — and the digits move
+  with the slider: 74 at the calibration, **101 at gamma 3.2**, nine levels under the threshold. A
+  little more brightness and every pixel in the box reads "light", the hash stops depending on the
+  digits, and **a broken pick becomes invisible** — silently, in the one signal `LockSession` trusts
+  to notice it. `pickCounterFingerprint` maps through the `Tone` first. Don't unpick that.
+- **Screen capture needs ALL THREE.** Two are the DPI half: `Win32.setProcessDpiAware()` (before any
+  AWT init) **and** `-Dsun.java2d.uiScale=1`. The dev display is 4K at 200% scaling; either alone
+  yields a wrong (scaled/black) capture. See `.claude` project memory `screen-capture-dpi` for
+  detail. `AutoLockpick.dpiWarning` now checks the flag at startup (the AWT default transform must
+  be 1.0) and says so loudly, because nothing downstream can: with `uiScale != 1` the `Robot` still
+  returns an image of exactly the requested *size*, merely resampled from the wrong region — every
+  size assertion passes and only the reader notices, by finding nothing.
+- **The third is the viewport, and it is the game's WINDOW — never the screen.** `Viewport` carries an
+  origin; `AutoLockpick.resolveViewport` measures the focused window's client rect
+  (`Win32.foregroundClientRect`), per F8 press, falling back to the display only when there is no
+  plausible window. Measuring the display and assuming the game filled it was a real shipped bug: a
+  player at 2560×1440 inside a larger desktop got "no lock detected" over a screenshot that looked
+  perfectly fine, because a wrong viewport **cannot fail loudly** — `LockReader.detectPins` clamps
+  its scan box to the frame, finds nothing, and returns -1. `WindowedGameTest` pins both halves.
+  **Only `GameScreen` ever applies the origin**; every other coordinate in the vision layer is
+  view-local, which is why the reader needed no change.
 
 ## Automated-mode status / gates
 
@@ -384,11 +482,22 @@ others silently breaks the automation. `KeySenderTest` and `LockSolverTest` pin 
 the 34-frame 4K calibration census (3 plate-count frames plus 31 offset frames across four slide
 sequences, with a `readCentered` cross-check), the `6p-gap-shadow` regression frame (a live
 failure dump whose labels the user established by marking every hole), the **21-frame 4K 7-plate
-census** (three sequences, `7p-*`), plus the 161-frame resolution sweep (23 display modes × 7
-states). `CaptureBoxTest` proves the capture box contains everything the reader samples — any plate
-count, any offsets, any viewport — with a safety belt. The full suite is **476 tests** across
-solver/vision/control/session and the root, and **every class outside `win32` is covered** (95.8%
-line / 93.8% branch, gated at 92/90 — see "Testing seams" below).
+census** (three sequences, `7p-*`), the 161-frame resolution sweep (23 display modes × 7
+states), and the **27-frame `gamma` corpus** (the game's slider end to end — see below).
+`CaptureBoxTest` proves the capture box contains everything the reader samples — any plate
+count, any offsets, any viewport — with a safety belt. The full suite is **778 tests** across
+solver/vision/control/session and the root, and **every class outside `win32` is covered** (94.2%
+line / 91.4% branch, gated at 92/90 — see "Testing seams" below).
+
+**The gamma slider is covered end to end** (`gamma/`, 27 frames, `src/test/data/frames/gamma/labels.txt`).
+The same 7-plate chest, the same key protocol, replayed at every setting from 1.2 to 3.2 — plus the
+dark extreme at 2560×1440, the reporter's own configuration. Raw, the ends fail in opposite ways; read
+through the `Tone` the frame carries, **all 21 sweep frames give the same labels as the calibrated
+fixtures**, with the pin-pop and the hole count agreeing on every plate. Only each sweep's `step-0`
+went into fitting a curve, so steps 1–6 are a straight holdout. Two gates guard the calibration
+itself: every frame at the calibrated gamma must measure as the **identity** (so the corpus keeps
+vouching for the reader's constants unchanged), and no real gamma setting may trip the off-family
+warning.
 
 **Verified live** against Gothic 1 Remake (`G1R-Win64-Shipping`):
 
@@ -472,6 +581,16 @@ Full numbers, method and spread are in `docs/INTERNALS.md` "Measured timings". T
 
 Remaining:
 
+- **A frame darker than the gamma slider alone can make it is still unexplained.** The user who
+  reported the bug sends frames reading **ink 13 beside a white of 184**, where the measured family
+  says 254 at that ink. The slider moves both anchors together, so a second setting is dimming their
+  picture — `m_ColorBrightnessOffset` (which sits in `GameUserSettings.ini` right beside `m_Gamma`),
+  HDR, or a display profile. `Tone` says so in the sidecar and applies the nearest measured curve; it
+  is not always enough (on one of their three frames a pin stays too faint to see, and the reader then
+  correctly reports *nothing* rather than the wrong lock — see the fan-lattice dead end). **Two dumps
+  taken with `m_ColorBrightnessOffset` at its extremes came back byte-identical to the baseline**, so
+  either the setting does not reach the frame, or it did not take effect — that is the thread to pull.
+  What is needed is a real `--dump` (PNG + sidecar) from that user, not a JPEG re-upload.
 - **Non-4K resolutions are sweep-validated, with caveats.** A live front-plate sweep of one
   5-plate lock reads exactly right at all 23 dev-machine display modes (800×600..4K, spanning
   16:9/16:10/4:3/5:4) — pinned by `LockReaderTest`'s 161 sweep fixtures. Caveats: one lock, one
@@ -525,6 +644,35 @@ centered** (it does not slide with the offset).
 
 ### Dead ends — don't re-derive these
 
+- **A tone curve cannot be extrapolated past its anchors. This was tried and it destroys the reader.**
+  The obvious shortcut is to fit a two-parameter `gain × power` curve through the pick-counter
+  panel's two *dark* anchors (28 and 75) and call it the gamma. Measured against a real 3.2 frame, it
+  maps observed **255 → 179**, crushes the pin highlights, and leaves **1** detected pin where the raw
+  frame had **7** — *worse than doing nothing*. Two closely-spaced dark anchors say nothing about the
+  far end of the range. `Tone`'s curves are therefore **measured at every level** from matched frame
+  pairs, and it **clamps** rather than extrapolates past the ends of the slider.
+- **A smaller fan is not a smaller lock.** Plate `i` of `n` sits at `(mid − i)` depth steps with
+  `mid = (n−1)/2`, so the fans of `n` and `n+2` **share a lattice**: a 6-plate lock's pins
+  (`±2.5, ±1.5, ±0.5`) *always* cover a 4-plate fan (`±1.5, ±0.5`), and a 7-plate always covers a
+  5-plate one. `detectPlateCount` disambiguates by taking the largest fan that fits — which works
+  only while **every** pin is seen. Lose the faintest one (which is exactly what a dark gamma does)
+  and it does not fail: it silently answers the **smaller lock**, handing the session a model with
+  the wrong number of plates to drive into walls until the picks run out. `fanFits` therefore also
+  checks one step past each end. **But only on a clean frame** — at 2048×1536 a single pin fragments
+  into several blobs (a real 5-plate lock yields **15**), one lands on a neighbouring fan position,
+  and the first version of this check rejected six perfectly good frames. Hence `CLUTTER_ALLOWANCE`.
+  Blob *size* cannot separate the two cases: the genuine 5-plate lock's pins measured `[54,53,56,98,42]px`
+  with a 54px blob on the extension, the misread 6-plate one `[58,29,39,41]px` with a 40px extension.
+- **"No lock detected" over a frame that looks fine means the COORDINATES are wrong, not the pixels.**
+  Do not go looking at thresholds. A viewport that describes the wrong rectangle cannot fail loudly —
+  `detectPins` clamps its scan box to the frame, finds nothing, and returns -1, while the dump (the
+  full frame) shows the lock exactly where the player sees it. This shipped: `AutoLockpick` measured
+  the *display* and assumed the game filled it, so anyone playing below their desktop resolution, in
+  a window, or on a second monitor was reported "no 4-7 plate lock detected" at a resolution the test
+  suite proves the reader handles. Fixed by measuring the window (`Win32.foregroundClientRect`);
+  reproduced headlessly in `WindowedGameTest`. **The reader was never at fault, and the reporter's
+  resolution was a red herring** — before touching a constant, run `--diagnose` on the frame: if it
+  reads correctly at `Viewport(png.width, png.height)`, the live viewport was wrong and that is that.
 - **Pin position does not encode offset.** A "pin x → offset" reader was built and scrapped; the pin
   never moves. Only its *size* changes, and only at offset 0.
 - **Drive-to-centre probing is impossible.** A connected plate can stop another from ever reaching

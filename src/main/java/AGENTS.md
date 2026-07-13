@@ -2,13 +2,24 @@
 
 - **`LockReader` has a regression gate — run it after any change:** `gradlew test` (wired into
   `check`/`build`) replays every labelled frame in `src/test/data/frames/` through
-  `LockReaderTest` and must stay green on **every one of the 217** (the 34-frame 4K calibration
-  census, the `6p-gap-shadow` regression frame, the 21-frame 7-plate census, and the 161-frame
-  resolution sweep). Every constant in the reader is fitted to those frames. To debug offline, `new LockReader(Viewport.REFERENCE)` is safe anywhere: it is pure
+  `LockReaderTest` and must stay green on **every one of the 244** (the 34-frame 4K calibration
+  census, the `6p-gap-shadow` regression frame, the 21-frame 7-plate census, the 161-frame
+  resolution sweep, and the 27-frame gamma corpus). Every constant in the reader is fitted to those
+  frames. To debug offline, `new LockReader(Viewport.REFERENCE)` is safe anywhere: it is pure
   image analysis (all Robot captures live in `GameScreen`), so you can feed `ImageIO.read(...)`
   images straight into `detectPlateCount` / `readCentered` / `readState`. Pixel constants in the
   vision classes are 4K reference values mapped through `Viewport` at construction - edit the
   reference constants, never the scaled instance fields.
+
+- **Every colour and luminance constant assumes the CALIBRATED gamma, and `Tone` is what makes that
+  true.** `new LockReader(viewport)` means "this frame is already at gamma 2.7" — right for the
+  fixtures, and right for nothing else. Live, `AutoLockpick` measures the gamma off the frame once per
+  F8 (`Tone.estimate`) and passes it to *both* `LockReader` and `GameScreen`; the reader maps every
+  pixel through it inside `isPin` and the hole scan, and `GameScreen` does the same before
+  thresholding the lockpick counter. **If you add a pixel gate, it must sit behind `tone.map(...)`
+  too** — an absolute number applied to a raw frame is a number that is only true for the author's
+  screen. The curves are measured (`tools/ToneTable.java`), never fitted: see CLAUDE.md's dead end on
+  extrapolating one, which is a mistake that has already been made here and it destroys the pins.
 
 - **Plate index orientation:** index `0` = back-most plate (top of the fan), `n-1` = front (the dark
   plate holding the keyhole/pick). The user's "panel 1..N" numbering is the REVERSE (front→back), so
@@ -59,9 +70,23 @@
 - **`capture()` is ~79ms, `readState()` is ~8ms** — the screenshot dominates every poll. Poll with
   `GameScreen.captureLock()`, which grabs the lock's 1300x1120 box (sized with a safety belt;
   `CaptureBoxTest` proves it contains everything the reader samples at every viewport) and
-  composites it into a *reused* full-frame canvas so the reader's absolute coordinates still land.
+  composites it into a *reused* view-sized canvas so the reader's coordinates still land.
   Never dump that image through `Captures`: every pixel outside the box is stale. (`LiveLockView`
   saves the full `capture()` for exactly this reason, and a test pins it.)
+
+- **Everything in the vision layer is VIEW-local; only `GameScreen` knows where the window is.** The
+  `Viewport` carries the game's origin on the virtual desktop, and `GameScreen` is the one class that
+  adds it — it keeps each box twice, once as the reader sees it and once translated for the grabber.
+  So an image reaching `LockReader` always has the game's top-left at (0,0), whether the game fills
+  the screen or sits in a corner of it. Don't leak the origin past `GameScreen`; the reader needed
+  **no change at all** for windowed play, and that is the property to preserve.
+
+- **A wrong viewport is silent by construction.** `detectPins` clamps its scan box to the frame, so
+  a viewport describing the wrong rectangle yields "no pins" → `detectPlateCount` = -1 → "no lock
+  detected", over a dumped frame in which the lock is plainly visible. That is a *feature* (better
+  than an out-of-bounds crash) and a trap: it makes an acquisition bug look exactly like a reader
+  bug. `LockReader.describe` exists to tell them apart, and `WindowedGameTest` pins the case that
+  shipped. Before suspecting a threshold, run `--diagnose` on the frame.
 
 - **A row that fails to read in a settled frame is a reader bug to fix, not a fact of the lock.**
   The one live case (a difficulty-4 chest) was an arch-gap shadow the old walk mistook for a
@@ -81,6 +106,15 @@
   background (candles/crates/torches) has far more warm pixels than the brass pins, so a global scan
   locks onto clutter. The lock is framed at a FIXED screen spot (`FAN_CENTER`+`DEPTH_STEP`, verified
   across 4 rooms), which is what makes the fixed box — and the whole reader — work.
+
+- **A missed pin does not read as "no lock". It reads as a SMALLER lock.** The fans of `n` and `n+2`
+  share a lattice, so a 6-plate lock's pins cover a 4-plate fan exactly (and a 7-plate covers a
+  5-plate). `detectPlateCount` takes the largest fan that fits, which is only safe while every pin is
+  seen — lose the faintest and it silently answers the smaller lock, which is far worse than finding
+  nothing: the session then drives a model with the wrong number of plates. `fanFits` checks one step
+  past each end, but **only on an uncluttered frame** (`CLUTTER_ALLOWANCE`): at low resolutions one pin
+  fragments into several blobs and a fragment lands on a neighbouring fan position. If you touch pin
+  detection, the frame to test against is `2048x1536/front-plate-sweep` (15 blobs for 5 pins).
 
 - **Approaches already tried and scrapped** (CLAUDE.md "Dead ends" has the detail): a "pin x →
   offset" reader (the pin never moves); drive-to-centre probing (a connected plate can block a plate

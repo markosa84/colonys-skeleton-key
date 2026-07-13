@@ -6,6 +6,7 @@ import java.util.List;
 import java.util.stream.Stream;
 
 import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.CsvSource;
@@ -123,6 +124,174 @@ class LockReaderTest {
         BufferedImage img = TestFrames.load(frame);
         assertEquals(expected.length, scaled.detectPlateCount(img), frame + ": plate count");
         assertArrayEquals(expected, scaled.readState(img, expected.length), frame + ": offsets");
+    }
+
+    // -- a smaller fan is not a smaller lock -------------------------------------------------------
+
+    /**
+     * <b>A 6-plate lock may never be answered as a 4-plate one.</b> The fans of {@code n} and
+     * {@code n+2} share a lattice - a 6-plate lock's pins cover a 4-plate fan exactly, and a 7-plate
+     * lock covers a 5-plate one - so "the largest fan that fits" is only a safe answer while every
+     * pin is seen. Lose the faintest one (which is what a dark gamma does: a real reported frame
+     * loses exactly one) and the reader used to answer the <b>smaller lock, silently</b>, handing
+     * the session a model with the wrong number of plates to drive into walls.
+     *
+     * <p>Here the front pin is painted out of a real 6-plate frame - the failure, reproduced. The
+     * only acceptable answers are 6 (if it can still be seen) or nothing at all. Never 4.
+     */
+    @Test
+    void aSixPlateLockWithAFaintFrontPinIsNeverMistakenForAFourPlateOne() {
+        BufferedImage img = TestFrames.load("6p-plate-5-sweep/step-0.png");
+        assertEquals(6, reader.detectPlateCount(img), "the frame really is a 6-plate lock");
+
+        double[] frontPin = reader.pinPosition(6, 5);
+        blackOut(img, (int) frontPin[0], (int) frontPin[1], 60);
+
+        assertEquals(-1, reader.detectPlateCount(img),
+                "with its front pin invisible this is not a readable lock - and it is certainly not "
+                        + "a 4-plate one, whose fan its remaining pins cover exactly");
+    }
+
+    /** The same trap one lattice up: a 7-plate lock's pins cover a 5-plate fan. */
+    @Test
+    void aSevenPlateLockWithAFaintFrontPinIsNeverMistakenForAFivePlateOne() {
+        BufferedImage img = TestFrames.load("7p-plate-2-sweep/step-0.png");
+        assertEquals(7, reader.detectPlateCount(img));
+
+        double[] frontPin = reader.pinPosition(7, 6);
+        blackOut(img, (int) frontPin[0], (int) frontPin[1], 60);
+
+        assertEquals(-1, reader.detectPlateCount(img));
+    }
+
+    /** Either end of the fan, not just the front: the plate left over may be the back one. */
+    @Test
+    void aSixPlateLockWithAFaintBackPinIsNotAFourPlateOneEither() {
+        BufferedImage img = TestFrames.load("6p-plate-5-sweep/step-0.png");
+
+        double[] backPin = reader.pinPosition(6, 0);
+        blackOut(img, (int) backPin[0], (int) backPin[1], 60);
+
+        assertEquals(-1, reader.detectPlateCount(img));
+    }
+
+    /** And the diagnosis says which trap it fell into, because the count alone would not show it. */
+    @Test
+    void describeExplainsAFanThatIsOnlyTheMiddleOfABiggerOne() {
+        BufferedImage img = TestFrames.load("6p-plate-5-sweep/step-0.png");
+        double[] frontPin = reader.pinPosition(6, 5);
+        blackOut(img, (int) frontPin[0], (int) frontPin[1], 60);
+
+        String report = reader.describe(img);
+
+        assertTrue(report.contains("one step past the end"), report);
+        assertTrue(report.contains("6-plate fan"), report);
+    }
+
+    /**
+     * A frame full of spurious blobs keeps the old answer. At low resolutions a pin fragments into
+     * several, so "an extra pin one step past the end" is noise there, not a plate - and the sweep
+     * frames at 2048x1536 are exactly that: 15 blobs for a 5-plate lock. This is the fixture that
+     * caught the first version of the check, which rejected six perfectly good frames.
+     */
+    @Test
+    void aClutteredFrameStillTrustsTheLargestFanThatFits() {
+        Viewport viewport = new Viewport(2048, 1536);
+        LockReader scaled = new LockReader(viewport);
+
+        assertEquals(5, scaled.detectPlateCount(
+                TestFrames.load("2048x1536/front-plate-sweep/step-0.png")));
+    }
+
+    /** Paints a square of the frame black, so the reader cannot find what was there. */
+    private static void blackOut(BufferedImage img, int cx, int cy, int radius) {
+        for (int y = cy - radius; y <= cy + radius; y++) {
+            for (int x = cx - radius; x <= cx + radius; x++) {
+                img.setRGB(x, y, 0);
+            }
+        }
+    }
+
+    // -- the game's gamma slider -------------------------------------------------------------------
+
+    /**
+     * The same 7-plate lock, the same key protocol, at both ends of the game's gamma slider - the
+     * setting that broke this reader in the field. Raw, these frames fail in opposite ways: at 1.2
+     * the brass falls under {@code isPin}'s {@code r >= 130} and <b>no fan fits at all</b> (the
+     * reported bug); at 3.2 the pins survive but the hole rows do not, and no pin reaches
+     * {@code CENTERED_MIN_PIXELS}, so the pop signal - the only thing that confirms an open lock -
+     * is dead.
+     *
+     * <p>Read through the {@link Tone} the frame itself carries, all of it comes back. Note what is
+     * being asserted: not "close enough", but the <b>same labels</b> the calibrated fixtures give,
+     * with the pin-pop and the hole count agreeing on every plate of every frame. Only step-0 of
+     * each sweep went into fitting the curves, so steps 1-6 are a straight holdout.
+     */
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("gammaFrames")
+    void readsTheSameLockAtAnyGamma(String frame, Viewport viewport, int[] expected) {
+        BufferedImage img = TestFrames.load(frame);
+        LockReader toned = new LockReader(viewport, Tone.estimate(img, viewport));
+
+        assertEquals(expected.length, toned.detectPlateCount(img), frame + ": plate count");
+        assertArrayEquals(expected, toned.readState(img, expected.length), frame + ": offsets");
+        boolean[] centered = toned.readCentered(img, expected.length);
+        for (int i = 0; i < expected.length; i++) {
+            assertEquals(expected[i] == 0, centered[i], frame + ": centered flag of plate " + i);
+        }
+    }
+
+    /**
+     * The 7-plate chest ({@code START = {0,-2,-3,3,3,2,3}}), plate 2 swept end to end - it drags
+     * nothing, so it moves alone and the labels are the protocol's, not a reading's. The same
+     * sequence was replayed at each gamma, which is why the labels transfer: game state depends on
+     * the keys sent, not on the pixels that come back. See {@code gamma/labels.txt}.
+     */
+    static Stream<Arguments> gammaFrames() {
+        List<Arguments> frames = new ArrayList<>();
+        for (String gamma : new String[] {"1.2", "3.2"}) {
+            for (int k = 0; k <= 6; k++) {
+                frames.add(Arguments.of("gamma/g-" + gamma + "/step-" + k + ".png",
+                        Viewport.REFERENCE, new int[] {0, -2, k - 3, 3, 3, 2, 3}));
+            }
+        }
+        // The dark end at the reporter's own resolution: gamma and scale are independent faults, and
+        // this is the one configuration that was actually reported broken.
+        for (int k = 0; k <= 6; k++) {
+            frames.add(Arguments.of("2560x1440/gamma-1.2-sweep/step-" + k + ".png",
+                    new Viewport(2560, 1440), new int[] {0, -2, k - 3, 3, 3, 2, 3}));
+        }
+        // The rest of the slider, at START. Every one of these is a different transfer curve.
+        for (String gamma : new String[] {"1.5", "1.8", "2.1", "2.4", "2.7", "3.0"}) {
+            frames.add(Arguments.of("gamma/g-" + gamma + ".png",
+                    Viewport.REFERENCE, new int[] {0, -2, -3, 3, 3, 2, 3}));
+        }
+        return frames.stream();
+    }
+
+    /**
+     * <b>The gate that keeps the calibration honest.</b> Every frame the reader was fitted on must
+     * measure as the calibrated tone - so the estimator resolves to the identity there, every
+     * constant in {@link LockReader} keeps the exact meaning it was measured with, and all 217 of
+     * these frames go on vouching for it unchanged. If this fails, the tone is rewriting the very
+     * pixels it was calibrated against.
+     */
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("calibratedFrames")
+    void everyCalibrationFrameMeasuresAsTheCalibratedGamma(String frame, Viewport viewport) {
+        Tone tone = Tone.estimate(TestFrames.load(frame), viewport);
+
+        assertTrue(tone.isCalibrated(), frame + ": " + tone.describe());
+    }
+
+    static Stream<Arguments> calibratedFrames() {
+        Stream<Arguments> census = labelledFrames()
+                .map(a -> Arguments.of(a.get()[0], Viewport.REFERENCE));
+        Stream<Arguments> sweep = sweepFrames()
+                .map(a -> Arguments.of(a.get()[0], a.get()[1]));
+        Stream<Arguments> counts = Stream.of("4-plates", "5-plates", "6-plates")
+                .map(n -> Arguments.of("plate-count/" + n + ".png", Viewport.REFERENCE));
+        return Stream.concat(census, Stream.concat(sweep, counts));
     }
 
     static Stream<Arguments> sweepFrames() {

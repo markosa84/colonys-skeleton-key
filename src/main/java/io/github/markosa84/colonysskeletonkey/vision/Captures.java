@@ -44,20 +44,43 @@ public final class Captures {
      * capture is evidence about a problem, not the problem.
      */
     public Optional<Path> save(BufferedImage img, String tag) {
+        return save(img, tag, "");
+    }
+
+    /**
+     * The same, plus {@code notes} written to a {@code .txt} beside the frame.
+     *
+     * <p>A frame alone is not evidence enough. The failure this exists for - the reader looking for
+     * the lock in the wrong place - produces a screenshot that looks <b>perfectly normal</b> to the
+     * person reporting it, because the pixels are fine and it is the coordinate frame that is wrong.
+     * The sidecar is what says which rectangle the tool thought it was reading, and what it found
+     * there. Ask a reporter for both files.
+     */
+    public Optional<Path> save(BufferedImage img, String tag, String notes) {
         try {
             Files.createDirectories(dir);
         } catch (IOException e) {
             System.out.println("  (could not create " + dir.toAbsolutePath() + ")");
             return Optional.empty();
         }
-        Path out = dir.resolve(tag + "-" + LocalDateTime.now(clock).format(STAMP) + ".png");
+        String name = tag + "-" + LocalDateTime.now(clock).format(STAMP);
+        Path out = dir.resolve(name + ".png");
         try {
             ImageIO.write(img, "png", out.toFile());
             System.out.println("  saved " + out.toAbsolutePath());
-            return Optional.of(out);
         } catch (IOException e) {
             System.out.println("  (could not save capture: " + e.getMessage() + ")");
             return Optional.empty();
         }
+        if (!notes.isEmpty()) {
+            Path sidecar = dir.resolve(name + ".txt");
+            try {
+                Files.writeString(sidecar, notes);
+                System.out.println("  saved " + sidecar.toAbsolutePath() + " - send both.");
+            } catch (IOException e) {
+                System.out.println("  (could not save notes: " + e.getMessage() + ")");
+            }
+        }
+        return Optional.of(out);
     }
 }

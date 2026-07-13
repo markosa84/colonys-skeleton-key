@@ -2,6 +2,7 @@ package io.github.markosa84.colonysskeletonkey.vision;
 
 import java.awt.Rectangle;
 import java.awt.image.BufferedImage;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Instant;
@@ -75,7 +76,7 @@ class LiveViewTest {
 
     @Test
     void theViewCountsPlatesFromTheFullFrame() {
-        LiveLockView view = new LiveLockView(screen, reader);
+        LiveLockView view = new LiveLockView(screen, reader, () -> "");
 
         assertEquals(5, view.detectPlateCount());
         assertEquals(List.of(FULL_SCREEN), grabber.asked);
@@ -84,7 +85,7 @@ class LiveViewTest {
     /** The pin pop is the game's own exact signal, and it agrees with the offsets. */
     @Test
     void theViewReadsWhichPinsHavePopped() {
-        LiveLockView view = new LiveLockView(screen, reader);
+        LiveLockView view = new LiveLockView(screen, reader, () -> "");
 
         assertArrayEquals(new boolean[] {true, false, false, false, false}, view.readCentered(5));
         assertEquals(List.of(FULL_SCREEN), grabber.asked);
@@ -96,9 +97,7 @@ class LiveViewTest {
      */
     @Test
     void dumpingAFrameSavesTheWholeScreenThroughCaptures(@TempDir Path dir) throws Exception {
-        Captures captures = new Captures(dir,
-                Clock.fixed(Instant.parse("2026-07-12T10:20:30.123Z"), ZoneOffset.UTC));
-        LiveLockView view = new LiveLockView(screen, reader, captures);
+        LiveLockView view = new LiveLockView(screen, reader, captures(dir), () -> "");
 
         Stdout.capturing(() -> view.dumpFrame("no-lock"));
 
@@ -107,6 +106,49 @@ class LiveViewTest {
         BufferedImage saved = ImageIO.read(dumped.toFile());
         assertEquals(3840, saved.getWidth(), "the whole screen, not the lock box");
         assertEquals(2160, saved.getHeight());
+    }
+
+    /**
+     * And it must say <b>which rectangle</b> it thought it was reading. The failure a dump usually
+     * documents - the viewport describing something other than the game's view - leaves a frame that
+     * looks entirely normal to whoever reports it, so the frame alone cannot settle anything. The
+     * sidecar carries the coordinates, and the reader's own account of what it found at them.
+     */
+    @Test
+    void aDumpCarriesTheDiagnosticsThatTheFrameCannot(@TempDir Path dir) throws Exception {
+        LiveLockView view = new LiveLockView(screen, reader, captures(dir),
+                () -> "display:  3840x2160, awt scale 1.00\n");
+
+        Stdout.capturing(() -> view.dumpFrame("no-lock"));
+
+        String notes = Files.readString(dir.resolve("no-lock-20260712-102030-123.txt"));
+        assertTrue(notes.contains("display:  3840x2160"), "the caller's environment: " + notes);
+        assertTrue(notes.contains("viewport: 3840x2160+0+0"), notes);
+        assertTrue(notes.contains("5 warm blob"), "what the reader saw: " + notes);
+        assertTrue(notes.contains("5 plates: every fan position covered"), notes);
+    }
+
+    /**
+     * The dump is written when something is already wrong. If gathering the environment is part of
+     * what is wrong, that costs the report a line - never the report, and never the run.
+     */
+    @Test
+    void anEnvironmentThatCannotBeReadStillLeavesAReadableReport(@TempDir Path dir) throws Exception {
+        LiveLockView view = new LiveLockView(screen, reader, captures(dir), () -> {
+            throw new IllegalStateException("no display");
+        });
+
+        Stdout.capturing(() -> view.dumpFrame("no-lock"));
+
+        String notes = Files.readString(dir.resolve("no-lock-20260712-102030-123.txt"));
+        assertTrue(notes.contains("environment: could not be read"), notes);
+        assertTrue(notes.contains("5 plates: every fan position covered"),
+                "and the half that matters is still there: " + notes);
+    }
+
+    private static Captures captures(Path dir) {
+        return new Captures(dir, Clock.fixed(Instant.parse("2026-07-12T10:20:30.123Z"),
+                ZoneOffset.UTC));
     }
 
     /** Crops the frame to whatever box is asked for - exactly what the live Robot hands back. */

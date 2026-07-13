@@ -81,10 +81,63 @@ That builds if needed and starts the tool in the current console (`Ctrl-C` to qu
 `G1R-Win64-Shipping.exe`, pass it as a quoted argument — `lockpick.bat "SomeOther.exe"`.
 (`.\gradlew.bat run` does the same thing, if you prefer.)
 
-Open a lock in-game (borderless windowed, 4K), keep it focused, and press **F8**. That is the whole
-interface. It forgets everything it knew, learns the plate connections by experiment, and opens the
-lock — **without ever resetting it**. Probing is itself a sequence of legal moves, so wherever it
-finishes is simply a closer state to solve from.
+Open a lock in-game, keep it focused, and press **F8**. That is the whole interface. It forgets
+everything it knew, learns the plate connections by experiment, and opens the lock — **without ever
+resetting it**. Probing is itself a sequence of legal moves, so wherever it finishes is simply a
+closer state to solve from.
+
+Play at any resolution, windowed or borderless, on any monitor. Each F8 measures the rectangle the
+game is actually drawing into (the focused window's client area) and scales the 4K calibration onto
+it, so the tool does not care whether the game fills your screen.
+
+### Your gamma setting
+
+The tool reads the lock by colour and brightness — it finds the brass pins by how warm they are, and
+the holes by how dark. Those are absolute numbers, and they were measured at **gamma 2.7**. The game's
+gamma slider runs **1.2 to 3.2**, and it is a matter of taste, so left alone those numbers would
+describe one player's screen and nobody else's. They did, and it broke: at a darker setting the brass
+never looked brass enough, the tool found no pins at all, and it reported *"no lock detected"* over a
+screenshot that looked perfectly fine.
+
+**You do not have to change anything.** Each F8 measures your gamma off the screen and undoes it
+before reading, so every setting on the slider works. There is deliberately no option to tell it your
+gamma: the game has a second brightness knob beside the first, and only the picture that actually
+comes out is the truth.
+
+How it measures it: the little **lockpick counter** under the lock is part of the interface, not the
+world, so it looks the same in every room, on every lock, at every resolution — but the gamma pass
+lands on it like everything else. Its white panel and its dark digits are a brightness reference of
+known shape, and how far they have moved says exactly how far everything else has. Reading is enough:
+nothing is guessed. And when the panel is not where it should be, the tool says so and corrects
+nothing, rather than inventing a correction.
+
+The one thing it will tell you about is a picture *darker than the gamma slider alone can make it* —
+that means a second setting is dimming things (the game's brightness offset, HDR, a display profile),
+and the correction may not be enough. It says so in the `.txt` beside the dump.
+
+### When it says "No 4-7 plate lock detected"
+
+It saves two files in `captures/`: the frame it was looking at, and a `.txt` beside it saying which
+rectangle it thought it was reading, what brightness it read, and what it found there. **Open the
+`.txt` first.** If the frame shows the lock perfectly well, then the pixels were never the problem
+and the tool was reading the wrong part of them — please report it, with both files.
+
+You can produce those two files whenever you like, without waiting for something to go wrong:
+
+```bat
+ColonysSkeletonKey.exe --dump
+```
+
+F8 then simply photographs the game's view and stops. Nothing is probed, no key is sent, and no
+lockpick is spent — so it is safe on any lock, and it is the best thing to attach to a bug report.
+
+You can also replay any saved frame through the reader, without the game running:
+
+```bat
+ColonysSkeletonKey.exe --diagnose captures\no-lock-20260713-103856-180.png
+```
+
+It prints the gamma it read, every brass pin it found, which plate counts fit them, and the offsets.
 
 If it strains and a lockpick breaks, that is expected, not fatal. F8 notices (from the lockpick
 counter), waits out the ~4–5 s animation during which the game ignores input, re-homes the selection,
@@ -228,17 +281,25 @@ searches for the cheapest solution and types it in.
 ### 1. Reading one frame into numbers
 
 `GameScreen` grabs the screen with `java.awt.Robot`, and `LockReader` turns that image into two
-facts: how many plates the lock has, and what offset each plate is at. (The whole 4K desktop is
+facts: how many plates the lock has, and what offset each plate is at. (The game's whole view is
 grabbed only to detect the lock or to save evidence; every poll uses `captureLock()`, which reads
 just the 1300×1120 box the lock occupies, sized with a safety belt so it can never crop the lock —
 see [Measured timings](#measured-timings).)
 
-What makes this tractable is that the minigame always frames the lock at the same spot on screen —
-the camera never moves. So the reader knows ahead of time exactly where each plate's brass pin will
-be drawn: on a fan, at `FAN_CENTER` plus a fixed `DEPTH_STEP` per plate of depth. It scans a small
-box for warm-colored blobs and asks which fan of 4, 5, 6 or 7 positions is fully covered. The
-largest such fan gives the plate count. Stray warm blobs — candles, wooden crates — simply don't
-land on a fan position, and are ignored.
+What makes this tractable is that the minigame always frames the lock at the same spot — the camera
+never moves. So the reader knows ahead of time exactly where each plate's brass pin will be drawn:
+on a fan, at `FAN_CENTER` plus a fixed `DEPTH_STEP` per plate of depth. It scans a small box for
+warm-colored blobs and asks which fan of 4, 5, 6 or 7 positions is fully covered. The largest such
+fan gives the plate count. Stray warm blobs — candles, wooden crates — simply don't land on a fan
+position, and are ignored.
+
+"The same spot" means the same spot **in the game's view**, which is not the same thing as the same
+spot on your desktop. Every constant above is a 4K measurement, and `Viewport` maps it onto the
+rectangle the game is really drawing into — measured, per F8, from the focused window rather than
+assumed to be the whole display. That assumption was the tool's one real bug: a player running the
+game smaller than his desktop had the reader scanning a region the lock was not in. It found no
+pins, said so, and saved a screenshot in which the lock was plainly visible. A wrong rectangle
+cannot announce itself; it can only come up empty.
 
 Getting the **offsets** is the interesting part, because the game plays a nasty trick: *the pin does
 not slide with its plate.* It stays put no matter where the plate is. All it does is **pop up** —

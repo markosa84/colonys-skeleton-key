@@ -97,6 +97,47 @@ class GameScreenTest {
         assertSame(screen.captureLock(), screen.captureLock());
     }
 
+    /**
+     * When the game does not fill the display, every grab has to be taken from where the window
+     * actually is - while the images handed on stay the game's own view, so the reader keeps
+     * working in the coordinates it was calibrated in. Get this backwards and the tool scans the
+     * desktop for a lock that is drawn 640px to the right of where it looks.
+     */
+    @Test
+    void aWindowedGameIsGrabbedAtItsPositionOnTheDesktop() {
+        Viewport windowed = new Viewport(640, 360, 2560, 1440);
+        GameScreen screen = new GameScreen(grabber, windowed);
+
+        BufferedImage img = screen.capture();
+        screen.captureLock();
+        screen.pickCounterFingerprint();
+
+        assertEquals(new Rectangle(640, 360, 2560, 1440), grabber.asked.get(0), "the window");
+        assertEquals(2560, img.getWidth(), "but the image is the view: the reader sees no offset");
+        Rectangle lock = GameScreen.lockBox(windowed);
+        assertEquals(new Rectangle(lock.x + 640, lock.y + 360, lock.width, lock.height),
+                grabber.asked.get(1), "the lock box, translated onto the desktop");
+        assertEquals(new Rectangle((int) windowed.x(3104) + 640, (int) windowed.y(1616) + 360,
+                (int) Math.ceil(windowed.len(72)), (int) Math.ceil(windowed.len(56))),
+                grabber.asked.get(2), "and so is the lockpick counter");
+    }
+
+    /** The canvas is the game's view, so the composite lands where the reader expects it. */
+    @Test
+    void aWindowedGamesCanvasIsStillViewLocal() {
+        grabber.frames = box -> corners(box.width, box.height);
+        Viewport windowed = new Viewport(640, 360, 2560, 1440);
+        GameScreen screen = new GameScreen(grabber, windowed);
+
+        BufferedImage canvas = screen.captureLock();
+        Rectangle lock = GameScreen.lockBox(windowed);
+
+        assertEquals(2560, canvas.getWidth(), "the view, not the desktop");
+        assertEquals(1440, canvas.getHeight());
+        assertEquals(BLUE, canvas.getRGB(lock.x, lock.y),
+                "the grab's top-left belongs at the box's view-local top-left");
+    }
+
     @Test
     void theCounterFingerprintReadsTheCalibratedCounterBox() {
         GameScreen screen = new GameScreen(grabber, Viewport.REFERENCE);

@@ -14,6 +14,38 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  */
 class ViewportTest {
 
+    /**
+     * The origin says where the game's view sits on the desktop, and <b>nothing else</b>: every
+     * mapping stays view-local, so the reader is handed the same coordinates whether the game fills
+     * the screen or sits in a corner of it. Only {@link GameScreen} ever adds the origin back.
+     */
+    @Test
+    void theOriginMovesTheGrabAndNothingElse() {
+        Viewport atOrigin = new Viewport(2560, 1440);
+        Viewport moved = new Viewport(640, 360, 2560, 1440);
+
+        assertEquals(atOrigin.scale(), moved.scale());
+        assertEquals(atOrigin.x(3090.0), moved.x(3090.0), "view-local: the window moved, the lock did not");
+        assertEquals(atOrigin.y(798.0), moved.y(798.0));
+        assertEquals(atOrigin.len(26.0), moved.len(26.0));
+        assertEquals(atOrigin.area(700), moved.area(700));
+
+        assertEquals(new Viewport(0, 0, 2560, 1440), atOrigin, "a view filling the screen starts at 0,0");
+    }
+
+    /** Calibration is about the size. A 4K window is just as calibrated wherever it sits. */
+    @Test
+    void aFourKWindowIsTheCalibratedSizeWhereverItIs() {
+        assertTrue(new Viewport(120, 80, 3840, 2160).isReference());
+        assertFalse(new Viewport(2560, 1440).isReference());
+    }
+
+    /** It goes in bug reports, so it has to name both halves. */
+    @Test
+    void itPrintsAsAGeometry() {
+        assertEquals("2560x1440+640+360", new Viewport(640, 360, 2560, 1440).toString());
+    }
+
     @Test
     void theReferenceViewportIsExactlyTheIdentity() {
         Viewport v = Viewport.REFERENCE;

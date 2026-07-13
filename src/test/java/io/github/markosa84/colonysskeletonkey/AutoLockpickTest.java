@@ -1,10 +1,14 @@
 package io.github.markosa84.colonysskeletonkey;
 
+import java.awt.Dimension;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.function.IntPredicate;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 import io.github.markosa84.colonysskeletonkey.control.KeySender;
 import io.github.markosa84.colonysskeletonkey.control.LockPoller;
@@ -12,6 +16,7 @@ import io.github.markosa84.colonysskeletonkey.control.RobotKeyboard;
 import io.github.markosa84.colonysskeletonkey.control.Slider;
 import io.github.markosa84.colonysskeletonkey.control.Telemetry;
 import io.github.markosa84.colonysskeletonkey.solver.Move;
+import io.github.markosa84.colonysskeletonkey.vision.TestFrames;
 import io.github.markosa84.colonysskeletonkey.vision.Viewport;
 import io.github.markosa84.colonysskeletonkey.win32.Win32;
 
@@ -73,6 +78,77 @@ class AutoLockpickTest {
         assertEquals("other.exe", AutoLockpick.resolveGameProcess(new String[] {"other.exe"}));
         assertEquals(GAME, AutoLockpick.resolveGameProcess(new String[] {"  "}),
                 "a blank argument is not a process name");
+    }
+
+    /**
+     * A flag is not a process name. {@code --dump} used to arrive as {@code args[0]} and be taken
+     * for the executable to gate on, which would have turned the focus gate off against every
+     * window on the machine.
+     */
+    @Test
+    void aFlagIsNotMistakenForTheProcessName() {
+        assertEquals(GAME, AutoLockpick.resolveGameProcess(new String[] {"--dump"}));
+        assertEquals("other.exe",
+                AutoLockpick.resolveGameProcess(new String[] {"--dump", "other.exe"}));
+    }
+
+    // -- --dump ------------------------------------------------------------------------------------
+
+    @Test
+    void dumpModeIsRecognisedOnlyWhenAskedFor() {
+        assertTrue(AutoLockpick.dumpMode(new String[] {"--dump"}));
+        assertTrue(AutoLockpick.dumpMode(new String[] {"other.exe", "--dump"}));
+        assertFalse(AutoLockpick.dumpMode(new String[] {}));
+        assertFalse(AutoLockpick.dumpMode(new String[] {"other.exe"}));
+    }
+
+    /** A dump writes the frame and touches nothing else: no plate is read, no key is sent. */
+    @Test
+    void aDumpOverTheFocusedGameSavesTheFrameAndProbesNothing() {
+        RecordingView view = new RecordingView();
+
+        String log = Stdout.capturing(
+                () -> assertTrue(AutoLockpick.dump(() -> GAME, GAME, view)));
+
+        assertEquals(List.of("dump"), view.dumped);
+        assertEquals(0, view.probes, "--dump must not read the lock, only photograph it");
+        assertTrue(log.contains("Dumping"), log);
+    }
+
+    /** The focus gate covers the dump too: a stray F8 must not photograph someone's desktop. */
+    @Test
+    void aDumpOverAnotherWindowSavesNothing() {
+        RecordingView view = new RecordingView();
+
+        String log = Stdout.capturing(
+                () -> assertFalse(AutoLockpick.dump(() -> "chrome.exe", GAME, view)));
+
+        assertTrue(view.dumped.isEmpty(), "the game was not focused, so there is nothing to dump");
+        assertTrue(log.contains("Ignored"), log);
+    }
+
+    /** A {@link LockView} that only remembers what it was asked to do. */
+    private static final class RecordingView implements io.github.markosa84.colonysskeletonkey
+            .session.LockView {
+        private final List<String> dumped = new ArrayList<>();
+        private int probes;
+
+        @Override
+        public int detectPlateCount() {
+            probes++;
+            return 5;
+        }
+
+        @Override
+        public boolean[] readCentered(int n) {
+            probes++;
+            return new boolean[n];
+        }
+
+        @Override
+        public void dumpFrame(String tag) {
+            dumped.add(tag);
+        }
     }
 
     // -- the focus gate --------------------------------------------------------------------------
@@ -162,26 +238,132 @@ class AutoLockpickTest {
         assertTrue(log.contains("Refocus the game and press F8 again"), log);
     }
 
+    // -- which rectangle the game is drawing into --------------------------------------------------
+
+    /**
+     * The bug this whole seam exists for. The tool measured the <b>display</b> and assumed the game
+     * filled it; a player running the game at less than their desktop resolution therefore had the
+     * reader scanning a rectangle the lock was not in, and got "no lock detected" over a screenshot
+     * that looked perfectly fine. Measure the window.
+     */
+    @Test
+    void aGameSmallerThanTheDesktopIsMeasuredByItsOwnWindow() {
+        Viewport vp = AutoLockpick.resolveViewport(
+                Optional.of(new Win32.Rect(640, 360, 2560, 1440)), new Dimension(3840, 2160));
+
+        assertEquals(new Viewport(640, 360, 2560, 1440), vp);
+        assertEquals(2560.0 / 3840, vp.scale(), 1e-9, "scaled to the game's view, not the desktop");
+    }
+
+    /** A game on the second monitor starts nowhere near the desktop's origin. */
+    @Test
+    void aWindowOnAnotherMonitorKeepsItsOrigin() {
+        Viewport vp = AutoLockpick.resolveViewport(
+                Optional.of(new Win32.Rect(3840, -120, 1920, 1080)), new Dimension(3840, 2160));
+
+        assertEquals(3840, vp.originX());
+        assertEquals(-120, vp.originY(), "monitors above the primary have negative y");
+    }
+
+    @Test
+    void aGameFillingTheDisplayIsExactlyWhatItAlwaysWas() {
+        Viewport vp = AutoLockpick.resolveViewport(
+                Optional.of(new Win32.Rect(0, 0, 3840, 2160)), new Dimension(3840, 2160));
+
+        assertEquals(Viewport.REFERENCE, vp);
+    }
+
+    /**
+     * No window, or one too small to be a game: fall back to the display, which is what the tool
+     * did for its whole first year. A splash screen owning the foreground must not make the reader
+     * scan a 300px box.
+     */
+    @Test
+    void anImplausibleWindowFallsBackToTheDisplay() {
+        Dimension display = new Dimension(2560, 1440);
+
+        assertEquals(new Viewport(2560, 1440),
+                AutoLockpick.resolveViewport(Optional.empty(), display));
+        assertEquals(new Viewport(2560, 1440), AutoLockpick.resolveViewport(
+                Optional.of(new Win32.Rect(100, 100, 300, 200)), display), "a splash, not a game");
+    }
+
+    // -- the DPI self-check ------------------------------------------------------------------------
+
+    /**
+     * Nothing downstream can catch this one: with uiScale != 1 the Robot still returns an image of
+     * exactly the size asked for, only resampled from the wrong region, so every size check in the
+     * pipeline passes and the reader just quietly finds nothing.
+     */
+    @Test
+    void javaScalingTheScreenIsCalledOutByName() {
+        assertEquals("", AutoLockpick.dpiWarning(1.0), "uiScale=1 took: nothing to say");
+
+        String warning = AutoLockpick.dpiWarning(1.5);
+        assertTrue(warning.contains("1.50x"), warning);
+        assertTrue(warning.contains("-Dsun.java2d.uiScale=1"), warning);
+        assertTrue(warning.contains("lockpick.bat"), "it must say how to fix it: " + warning);
+    }
+
     // -- the banner ------------------------------------------------------------------------------
 
     @Test
     void theBannerSaysWhereItWillLookAndWhatItWillType() {
-        String banner = Stdout.capturing(() ->
-                AutoLockpick.printBanner(new Viewport(1920, 1080), "other.exe"));
+        String banner = Stdout.capturing(() -> AutoLockpick.printBanner("other.exe", "system"));
 
-        assertTrue(banner.contains("1920x1080"), banner);
-        assertTrue(banner.contains("scaled from the 4K calibration"), banner);
+        assertTrue(banner.contains("any resolution"), banner);
+        assertTrue(banner.contains("system"), "the DPI awareness obtained belongs in a bug report");
         assertTrue(banner.contains("other.exe"),
                 "the banner must name the process the gate waits for: " + banner);
         assertTrue(banner.contains("F8"), banner);
     }
 
-    @Test
-    void theBannerSaysWhenItIsRunningAtTheCalibratedResolution() {
-        String banner = Stdout.capturing(() ->
-                AutoLockpick.printBanner(Viewport.REFERENCE, GAME));
+    // -- replaying a reported frame ----------------------------------------------------------------
 
-        assertTrue(banner.contains("the calibrated resolution"), banner);
+    @Test
+    void diagnoseIsRecognisedOnlyWithAFrameToReplay() {
+        assertEquals(Optional.of(Path.of("f.png")),
+                AutoLockpick.diagnoseArg(new String[] {"--diagnose", "f.png"}));
+        assertEquals(Optional.empty(), AutoLockpick.diagnoseArg(new String[] {"--diagnose"}),
+                "no frame named: not a diagnose run");
+        assertEquals(Optional.empty(), AutoLockpick.diagnoseArg(new String[] {"other.exe"}));
+    }
+
+    /**
+     * The offline half of a bug report: the reporter's own capture, read back through the reader.
+     * This is a 1440p frame - the resolution the tool was reported broken at - and it reads
+     * perfectly, which is the whole point: the pixels were never the problem.
+     */
+    @Test
+    void diagnoseReplaysASavedFrameAndReadsTheLock() {
+        String log = Stdout.capturing(() ->
+                assertTrue(AutoLockpick.diagnose(TestFrames.path("2560x1440/front-plate-sweep/step-0.png"))));
+
+        assertTrue(log.contains("2560x1440+0+0"), log);
+        assertTrue(log.contains("5 plates"), log);
+        assertTrue(log.contains("[3, 1, 2, 0, 3]"), "the offsets the sweep labels: " + log);
+    }
+
+    /** A frame with no lock in it says so, and says which of the two reasons it is. */
+    @Test
+    void diagnoseOnAFrameWithNoLockExplainsItself(@TempDir Path dir) throws Exception {
+        Path blank = dir.resolve("blank.png");
+        javax.imageio.ImageIO.write(new java.awt.image.BufferedImage(3840, 2160,
+                java.awt.image.BufferedImage.TYPE_INT_RGB), "png", blank.toFile());
+
+        String log = Stdout.capturing(() -> assertFalse(AutoLockpick.diagnose(blank)));
+
+        assertTrue(log.contains("0 warm blob"), log);
+        assertTrue(log.contains("wrong viewport"), "it must name the likely cause: " + log);
+    }
+
+    @Test
+    void diagnoseOnSomethingThatIsNotAFrameSaysSo(@TempDir Path dir) throws Exception {
+        Path notAnImage = java.nio.file.Files.writeString(dir.resolve("notes.txt"), "hello");
+
+        assertFalse(Stdout.capturing(() -> assertFalse(AutoLockpick.diagnose(notAnImage))).isEmpty());
+        assertFalse(Stdout.capturing(() ->
+                assertFalse(AutoLockpick.diagnose(dir.resolve("nope.png")))).isEmpty());
     }
 
     /**

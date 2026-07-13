@@ -1,0 +1,62 @@
+# The game's gamma slider (m_Gamma, 1.2 .. 3.2), against the 7-plate difficulty-4 chest.
+#
+# Every colour and luminance constant in LockReader was fitted at gamma 2.7. The slider is a matter
+# of taste, so those numbers describe one player's pixels; a user at a darker setting got
+# "No 4-7 plate lock detected" over a screenshot that looked perfectly fine. These frames are what
+# vision/Tone is measured against and gated by.
+#
+# HOW THE LABELS WERE ESTABLISHED - the same argument the resolution sweep rests on, and the reason
+# neither needed a reader that could already be trusted: game state depends on the KEYS SENT, not on
+# the pixels that come back. So the state is known from the protocol, and the frame only has to
+# agree with it.
+#
+#   protocol: R, then W x6 (clamps the cursor to plate 0), then S x2 (selects plate 2).
+#             One dump, then six more, one after each A.
+#
+# The chest's START is {0,-2,-3,3,3,2,3} and plate 2 drags nothing (its connections were probed
+# live: 0->4(N), 3->1(N),4(N), 6->1(N)), so plate 2 sweeps its own track alone, from -3 to +3, and
+# nothing else on the lock moves. No move can strain: not one lockpick was spent capturing these.
+#
+#   step-k = [0, -2, k-3, 3, 3, 2, 3]
+#
+# Captured with `lockpick.bat --dump`, which photographs the game's view on F8 and does nothing else
+# - no probing, no keys. The originals are archived off-repo (C:\dev\frames-archive\gamma) and these
+# are the shrunk copies; see ../README.md.
+#
+# THE PROBE. Tone reads the lockpick-counter panel, which is opaque UI: the room cannot touch it,
+# but the gamma pass runs over it like everything else. Its two plateaus across the slider - and note
+# how they hand over to each other, which is what lets one probe span the whole range:
+#
+#   gamma    1.2   1.5   1.8   2.1   2.4  [2.7]  3.0   3.2
+#   ink        0     9    24    41    58    74    91   100    <- crushed to black at the dark end
+#   white    244   253   255   255   255   255   255   255    <- clipped from 1.8 up
+#
+# g-1.2/ and g-3.2/ are full sweeps (the two ends, where the margins are thinnest). The single frames
+# are the rest of the slider at START, one per measured transfer curve. Only the step-0 of each was
+# used to FIT a curve, so every other frame here is a holdout.
+
+g-1.2/step-0.png = [0, -2, -3, 3, 3, 2, 3]
+g-1.2/step-1.png = [0, -2, -2, 3, 3, 2, 3]
+g-1.2/step-2.png = [0, -2, -1, 3, 3, 2, 3]
+g-1.2/step-3.png = [0, -2,  0, 3, 3, 2, 3]
+g-1.2/step-4.png = [0, -2,  1, 3, 3, 2, 3]
+g-1.2/step-5.png = [0, -2,  2, 3, 3, 2, 3]
+g-1.2/step-6.png = [0, -2,  3, 3, 3, 2, 3]
+
+g-3.2/step-0.png = [0, -2, -3, 3, 3, 2, 3]
+g-3.2/step-1.png = [0, -2, -2, 3, 3, 2, 3]
+g-3.2/step-2.png = [0, -2, -1, 3, 3, 2, 3]
+g-3.2/step-3.png = [0, -2,  0, 3, 3, 2, 3]
+g-3.2/step-4.png = [0, -2,  1, 3, 3, 2, 3]
+g-3.2/step-5.png = [0, -2,  2, 3, 3, 2, 3]
+g-3.2/step-6.png = [0, -2,  3, 3, 3, 2, 3]
+
+g-1.5.png = [0, -2, -3, 3, 3, 2, 3]
+g-1.8.png = [0, -2, -3, 3, 3, 2, 3]
+g-2.1.png = [0, -2, -3, 3, 3, 2, 3]
+g-2.4.png = [0, -2, -3, 3, 3, 2, 3]
+g-2.7.png = [0, -2, -3, 3, 3, 2, 3]
+g-3.0.png = [0, -2, -3, 3, 3, 2, 3]
+
+# ../2560x1440/gamma-1.2-sweep/ is the same protocol at the reporter's own resolution: gamma and
+# scale are independent faults, and that is the one configuration actually reported broken.

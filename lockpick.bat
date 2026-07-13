@@ -2,7 +2,10 @@
 rem ---------------------------------------------------------------------------
 rem  Starts The Colony's Skeleton Key - the Gothic Remake auto-lockpicker.
 rem
-rem  Usage:  lockpick.bat  [game-process-name]      e.g. lockpick.bat "G1R-Win64-Shipping.exe"
+rem  Usage:  lockpick.bat  [--dump] [game-process-name]
+rem             lockpick.bat                              solve the open lock on F8
+rem             lockpick.bat --dump                       F8 only saves a frame + sidecar
+rem             lockpick.bat "G1R-Win64-Shipping.exe"     name the game's process
 rem
 rem  Builds first if needed, then runs AutoLockpick in this console. The two JVM
 rem  flags are not optional: --enable-native-access silences the user32.dll FFM
@@ -42,8 +45,9 @@ if not exist "%JAR%" (
     exit /b 1
 )
 
-rem Pass the process name as ONE argument, so a name with spaces does not arrive as several.
-rem Without it AutoLockpick uses its own default (G1R-Win64-Shipping.exe).
+rem Forward the arguments as typed: %* keeps the quoting, so a process name with spaces still
+rem arrives as ONE argument, and flags like --dump come through beside it. Without any,
+rem AutoLockpick uses its own default (G1R-Win64-Shipping.exe).
 set "JAVA=%JAVA_HOME%\bin\java.exe"
 set "FLAGS=--enable-native-access=ALL-UNNAMED -Dsun.java2d.uiScale=1"
 
@@ -52,5 +56,5 @@ set "MAIN=io.github.markosa84.colonysskeletonkey.AutoLockpick"
 if "%~1"=="" (
     "%JAVA%" %FLAGS% -cp "%JAR%" %MAIN%
 ) else (
-    "%JAVA%" %FLAGS% -cp "%JAR%" %MAIN% "%~1"
+    "%JAVA%" %FLAGS% -cp "%JAR%" %MAIN% %*
 )

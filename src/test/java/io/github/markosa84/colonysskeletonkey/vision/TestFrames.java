@@ -4,6 +4,7 @@ import java.awt.image.BufferedImage;
 import java.io.File;
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.nio.file.Path;
 
 import javax.imageio.ImageIO;
 
@@ -29,7 +30,7 @@ import javax.imageio.ImageIO;
  *
  * <p>This class is the one place a frame is read. Anything new that needs a frame goes through it.
  */
-final class TestFrames {
+public final class TestFrames {
 
     private static final File DIR =
             new File(System.getProperty("lockpick.frames.dir", "src/test/data/frames"));
@@ -37,22 +38,27 @@ final class TestFrames {
     private TestFrames() {}
 
     /** True if the labelled frames are on this machine at all; false means a broken checkout. */
-    static boolean available() {
+    public static boolean available() {
         return DIR.isDirectory();
     }
 
     /** Reads {@code name} (relative to the frames directory) as an image, or fails loudly. */
-    static BufferedImage load(String name) {
+    public static BufferedImage load(String name) {
+        try {
+            return ImageIO.read(path(name).toFile());
+        } catch (IOException e) {
+            throw new UncheckedIOException("Could not decode " + name, e);
+        }
+    }
+
+    /** The frame's path, for the few things that take a file rather than an image (--diagnose). */
+    public static Path path(String name) {
         File file = new File(DIR, name);
         if (!file.isFile()) {
             throw new IllegalStateException("Missing test frame " + file.getAbsolutePath()
                     + " - run via Gradle, or start the JVM in the repository root, or point"
                     + " -Dlockpick.frames.dir at src/test/data/frames.");
         }
-        try {
-            return ImageIO.read(file);
-        } catch (IOException e) {
-            throw new UncheckedIOException("Could not decode " + file, e);
-        }
+        return file.toPath();
     }
 }

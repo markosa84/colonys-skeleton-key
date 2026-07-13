@@ -3,10 +3,27 @@
 Build, run and architecture live in `CLAUDE.md`. Code-level gotchas live in
 `src/main/java/AGENTS.md`. This file is about the *workflow* — the things that cost time.
 
-- **The automated check is `gradlew test`** (JUnit 6; 476 tests, including the screen-reader gate over
-  all 217 labelled frames; no game, no display). `gradlew build` wires it into `check`, **and with it
+- **The automated check is `gradlew test`** (JUnit 6; 778 tests, including the screen-reader gate over
+  all 244 labelled frames; no game, no display). `gradlew build` wires it into `check`, **and with it
   a JaCoCo coverage gate** (≥92% line, ≥90% branch, `win32` excluded). A change that stops testing
   something fails the build — raise the floor when coverage rises, never lower it to fit a change.
+
+- **A user's bug report is a PNG, and the answer is usually in the sidecar next to it.** A failed read
+  dumps `captures/<tag>-<stamp>.png` **and** a `.txt` with the viewport, the environment, **the gamma
+  the tool read** and the reader's account of what it found. Ask for both — and if the tool is not
+  failing outright, ask them to run **`lockpick.bat --dump`**, which photographs the game's view on F8
+  and does nothing else (no probing, no keys, no lockpicks spent). A JPEG re-uploaded to an image host
+  is not evidence: it has been through someone else's encoder. Then replay the frame offline —
+  `gradlew run '--args=--diagnose <png>'`, no game needed — *before* touching the reader. See CLAUDE.md's
+  dead ends: a frame that reads correctly offline was never the problem (the live *rectangle* was
+  wrong), and one that does not may simply be at a gamma nobody calibrated for.
+
+- **When you must change the reader, the corpus is the argument — and it costs the player nothing to
+  extend.** Both the resolution sweep and the gamma corpus rest on the same trick: **game state depends
+  on the keys sent, not the pixels that come back**, so replay a known protocol and every frame is
+  labelled before it is read. Pick a plate that drags nothing (probe the connections first), sweep it
+  end to end, and no move can strain. That is how 27 gamma frames were captured across 8 settings
+  without spending a single lockpick.
 
 - **Everything is testable headless; nothing needs the game.** The `Robot` cannot exist in a headless
   JVM, so it hides behind seams (`ScreenGrabber`, `RobotKeyboard.Taps`, `Slider.Ticks`) — see
