@@ -18,15 +18,15 @@ import io.github.markosa84.colonysskeletonkey.session.LockView;
 public final class LiveLockView implements LockView {
 
     private final GameScreen screen;
-    private final LockReader reader;
+    private final LockAnalyzer reader;
     private final Captures captures;
     private final Supplier<String> environment;
 
-    public LiveLockView(GameScreen screen, LockReader reader, Supplier<String> environment) {
+    public LiveLockView(GameScreen screen, LockAnalyzer reader, Supplier<String> environment) {
         this(screen, reader, new Captures(), environment);
     }
 
-    LiveLockView(GameScreen screen, LockReader reader, Captures captures,
+    LiveLockView(GameScreen screen, LockAnalyzer reader, Captures captures,
             Supplier<String> environment) {
         this.screen = screen;
         this.reader = reader;

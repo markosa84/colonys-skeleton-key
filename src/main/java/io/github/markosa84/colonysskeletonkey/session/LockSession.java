@@ -110,6 +110,11 @@ public final class LockSession {
     private final List<Occlusion> occluded = new ArrayList<>();
     /** Strains this run. The only quantity we can always observe. */
     private int strains;
+    /**
+     * Slides that actually moved a plate. Zero of them, once nothing is left to try, is the
+     * signature of a lock we <b>misread</b> rather than one that is stuck - see {@link #loop}.
+     */
+    private int moves;
     /** Broken picks, counted off the lockpick counter. Exact at every skill level. */
     private int observedBreaks;
     /** Strains the pick now in hand has taken. Resets whenever one breaks. */
@@ -163,6 +168,7 @@ public final class LockSession {
         plan = null;
         planFrom = null;
         strains = 0;
+        moves = 0;
         observedBreaks = 0;
         strainsOnThisPick = 0;
         strainsPerPick = 0;
@@ -223,6 +229,20 @@ public final class LockSession {
             }
             Move action = nextAction();
             if (action == null) {
+                if (moves == 0) {
+                    // Every lock the game hands you is openable, so from any configuration at least
+                    // one slide is legal. If NOTHING moved - no plate, in either direction - then the
+                    // lock being driven is not the lock on screen: the plate count or the offsets
+                    // were misread, and every strain above was spent proving it. Reported as the bug
+                    // it is, with the frame attached, instead of shrugging at the lock.
+                    System.out.println("Nothing moved. No plate would slide in either direction, and "
+                            + "a lock the game can open always has a legal move - so the lock I read "
+                            + "is not the lock on screen (the plate count or the offsets are wrong). "
+                            + "That is a bug in this tool, not a hard lock.");
+                    view.dumpFrame("wrong-model");
+                    System.out.println("Please report the saved .png and the .txt beside it.");
+                    return;
+                }
                 System.out.println("Stuck: no move is left to try. Plates " + unprobed()
                         + " will not budge in either direction, and no probed plate can free them.");
                 return;
@@ -239,6 +259,7 @@ public final class LockSession {
         MoveExecutor.Observation obs = mover.play(n, before, move);
 
         if (obs.outcome() == MoveExecutor.Outcome.MOVED && !obs.pickBroke()) {
+            moves++;
             if (LockModel.isComplete(obs.state())) {
                 cur = obs.state();
                 learn(p, before, cur);

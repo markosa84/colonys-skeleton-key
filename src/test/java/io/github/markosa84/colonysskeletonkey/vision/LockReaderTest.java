@@ -189,10 +189,51 @@ class LockReaderTest {
     }
 
     /**
-     * A frame full of spurious blobs keeps the old answer. At low resolutions a pin fragments into
-     * several, so "an extra pin one step past the end" is noise there, not a plate - and the sweep
-     * frames at 2048x1536 are exactly that: 15 blobs for a 5-plate lock. This is the fixture that
-     * caught the first version of the check, which rejected six perfectly good frames.
+     * <b>The bug a user actually paid for.</b> The two tests above lose <i>one</i> end pin, and the
+     * fan is still refused because the other end pin is right there to be seen. A dark or
+     * HDR-tonemapped frame is not so kind: it takes the faintest pins, and the faintest pins are the
+     * two on the ends. Lose both and what is left <b>is</b> a 4-plate fan, with nothing beyond either
+     * end to give it away.
+     *
+     * <p>That is what a reporter's console shows: {@code Detected 4 plates at [-2, -3, 1, -1]} on a
+     * 6-plate chest, then nine strains against plates that were never going to move, then "Stuck".
+     * Only the <b>pins</b> are painted out here - the plates and their hole rows are untouched,
+     * because that is what a pin too faint to see leaves behind, and it is what lets the reader know
+     * it is being lied to.
+     */
+    @Test
+    void aSixPlateLockWithBothEndPinsInvisibleIsNeverAFourPlateOne() {
+        BufferedImage img = TestFrames.load("6p-plate-5-sweep/step-0.png");
+        assertEquals(6, reader.detectPlateCount(img), "the frame really is a 6-plate lock");
+
+        blackOutPin(img, 6, 0);
+        blackOutPin(img, 6, 5);
+
+        assertEquals(-1, reader.detectPlateCount(img),
+                "with both end pins invisible the remaining four cover a 4-plate fan exactly - but "
+                        + "a plate's hole row still sits one step past each end, so this is the "
+                        + "middle of a 6-plate lock and the only honest answer is none");
+    }
+
+    /** The same trap one lattice up, and the same two pins: a 7-plate lock covers a 5-plate fan. */
+    @Test
+    void aSevenPlateLockWithBothEndPinsInvisibleIsNeverAFivePlateOne() {
+        BufferedImage img = TestFrames.load("7p-plate-2-sweep/step-0.png");
+        assertEquals(7, reader.detectPlateCount(img));
+
+        blackOutPin(img, 7, 0);
+        blackOutPin(img, 7, 6);
+
+        assertEquals(-1, reader.detectPlateCount(img));
+    }
+
+    /**
+     * A frame full of spurious blobs keeps the right answer - and no longer needs an allowance to do
+     * it. At low resolutions a pin fragments into several blobs (15 for a 5-plate lock at 2048x1536),
+     * and the room adds its own warm dots; the check that asked the <i>pins</i> what lay past the end
+     * of a fan had to be switched off on frames like this one, which is precisely the hole the
+     * wrong-model bug walked through. Asking the hole rows instead, clutter is simply not a category
+     * the question has: a candle is not a row of six holes.
      */
     @Test
     void aClutteredFrameStillTrustsTheLargestFanThatFits() {
@@ -201,6 +242,12 @@ class LockReaderTest {
 
         assertEquals(5, scaled.detectPlateCount(
                 TestFrames.load("2048x1536/front-plate-sweep/step-0.png")));
+    }
+
+    /** Paints out a plate's pin, leaving its plate and hole row exactly as they were. */
+    private void blackOutPin(BufferedImage img, int n, int plate) {
+        double[] pin = reader.pinPosition(n, plate);
+        blackOut(img, (int) pin[0], (int) pin[1], 22);
     }
 
     /** Paints a square of the frame black, so the reader cannot find what was there. */

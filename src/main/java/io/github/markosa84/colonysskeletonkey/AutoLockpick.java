@@ -23,8 +23,10 @@ import io.github.markosa84.colonysskeletonkey.session.LockSession;
 import io.github.markosa84.colonysskeletonkey.session.LockView;
 import io.github.markosa84.colonysskeletonkey.solver.LockModel;
 import io.github.markosa84.colonysskeletonkey.vision.GameScreen;
+import io.github.markosa84.colonysskeletonkey.vision.LatticeReader;
 import io.github.markosa84.colonysskeletonkey.vision.LiveLockView;
 import io.github.markosa84.colonysskeletonkey.vision.LivePoller;
+import io.github.markosa84.colonysskeletonkey.vision.LockAnalyzer;
 import io.github.markosa84.colonysskeletonkey.vision.LockReader;
 import io.github.markosa84.colonysskeletonkey.vision.Tone;
 import io.github.markosa84.colonysskeletonkey.vision.Viewport;
@@ -58,6 +60,13 @@ public final class AutoLockpick {
     private static final String DEFAULT_GAME_PROCESS = "G1R-Win64-Shipping.exe";
 
     /**
+     * Which reader to use. The relative, tone-free {@code lattice} reader is the default: it matches
+     * the pixel-calibrated one on every labelled frame and also reads HDR frames the calibrated one
+     * cannot. {@code --reader=legacy} still selects the old one. See {@link #analyzer}.
+     */
+    private static final String DEFAULT_READER = "lattice";
+
+    /**
      * Smallest client area we will believe is the game. Below this the window is a splash, a
      * tooltip, or something else that briefly owns the foreground, and its rectangle would send the
      * reader hunting in a 200px box; the display is a safer guess.
@@ -65,9 +74,10 @@ public final class AutoLockpick {
     private static final int MIN_GAME_WIDTH = 640, MIN_GAME_HEIGHT = 480;
 
     public static void main(String[] args) throws Exception {
+        String readerKind = resolveReader(args);
         Optional<Path> frame = diagnoseArg(args);
         if (frame.isPresent()) {
-            System.exit(diagnose(frame.get()) ? 0 : 1);
+            System.exit(diagnose(frame.get(), readerKind) ? 0 : 1);
         }
         String gameProcess = resolveGameProcess(args);
         boolean dumping = dumpMode(args);
@@ -87,6 +97,12 @@ public final class AutoLockpick {
             System.out.println("--dump: F8 saves the game's view and the sidecar. Nothing is "
                     + "probed, no key is sent, no lockpick is spent.");
         }
+        if (!readerKind.equals(DEFAULT_READER)) {
+            System.out.println("--reader=" + readerKind + ": using the "
+                    + ("legacy".equals(readerKind) ? "old pixel-calibrated reader"
+                            : "lattice".equals(readerKind) ? "relative (tone-free) reader" : readerKind)
+                    + " instead of the default.");
+        }
         String warning = dpiWarning(awtScale());
         if (!warning.isEmpty()) {
             System.out.println(warning);
@@ -103,7 +119,7 @@ public final class AutoLockpick {
                 // per poll would buy nothing and cost a grab every time.
                 Tone tone = Tone.estimate(new GameScreen(robot, viewport).capture(), viewport);
                 GameScreen screen = new GameScreen(robot, viewport, tone);
-                LockReader reader = new LockReader(viewport, tone);
+                LockAnalyzer reader = analyzer(readerKind, viewport, tone);
                 Slider slider = new Slider(new LivePoller(screen, reader), keys, Slider.Timing.GAME);
                 LockView view = new LiveLockView(screen, reader,
                         () -> environment(gameProcess, dpi));
@@ -185,10 +201,22 @@ public final class AutoLockpick {
                 Win32.foregroundClientRect().map(Object::toString).orElse("could not be measured"));
     }
 
-    /** The {@code --diagnose <png>} argument, if that is what this invocation is. */
+    /**
+     * The {@code --diagnose <png>} argument, if that is what this invocation is: the first non-flag
+     * token after {@code --diagnose}, so {@code --diagnose --reader=lattice frame.png} finds the frame
+     * rather than the flag between them.
+     */
     static Optional<Path> diagnoseArg(String[] args) {
         int i = Arrays.asList(args).indexOf("--diagnose");
-        return i >= 0 && i + 1 < args.length ? Optional.of(Path.of(args[i + 1])) : Optional.empty();
+        if (i < 0) {
+            return Optional.empty();
+        }
+        for (int j = i + 1; j < args.length; j++) {
+            if (!args[j].startsWith("--")) {
+                return Optional.of(Path.of(args[j]));
+            }
+        }
+        return Optional.empty();
     }
 
     /**
@@ -199,7 +227,12 @@ public final class AutoLockpick {
      * capture that the live tool could not read, but that reads correctly here, proves the pixels
      * were always fine and the live <b>viewport</b> was wrong.
      */
+    /** Replays through the default (calibrated) reader. */
     static boolean diagnose(Path png) {
+        return diagnose(png, DEFAULT_READER);
+    }
+
+    static boolean diagnose(Path png, String readerKind) {
         BufferedImage img;
         try {
             img = ImageIO.read(png.toFile());
@@ -212,7 +245,7 @@ public final class AutoLockpick {
             return false;
         }
         Viewport viewport = new Viewport(img.getWidth(), img.getHeight());
-        LockReader reader = new LockReader(viewport, Tone.estimate(img, viewport));
+        LockAnalyzer reader = analyzer(readerKind, viewport, Tone.estimate(img, viewport));
         System.out.println("=== " + png + " ===");
         System.out.printf(Locale.ROOT, "viewport: %s (scale %.4f from the 4K calibration)%n%n",
                 viewport, viewport.scale());
@@ -252,6 +285,33 @@ public final class AutoLockpick {
                 .filter(a -> !a.isBlank() && !a.startsWith("--"))
                 .findFirst()
                 .orElseGet(() -> System.getProperty("game.process", DEFAULT_GAME_PROCESS));
+    }
+
+    /**
+     * Which reader to build: {@code --reader=lattice|legacy}, else {@code -Dlockpick.reader=...}, else
+     * the calibrated default. It <b>must</b> start with {@code --}, or {@link #resolveGameProcess} would
+     * swallow it as the game's process name (the first non-flag positional wins there).
+     */
+    static String resolveReader(String[] args) {
+        String prefix = "--reader=";
+        return Arrays.stream(args)
+                .filter(a -> a.startsWith(prefix))
+                .map(a -> a.substring(prefix.length()))
+                .findFirst()
+                .orElseGet(() -> System.getProperty("lockpick.reader", DEFAULT_READER))
+                .toLowerCase(Locale.ROOT);
+    }
+
+    /**
+     * The reader named by {@code kind}: only an explicit {@code legacy} selects the old pixel-calibrated
+     * {@link LockReader}; anything else (the default, and any typo) gets the relative {@link LatticeReader}.
+     * Both take the same {@link Tone} - the lattice reader uses it only where it can be trusted, the
+     * legacy one always.
+     */
+    static LockAnalyzer analyzer(String kind, Viewport viewport, Tone tone) {
+        return "legacy".equals(kind)
+                ? new LockReader(viewport, tone)
+                : new LatticeReader(viewport, tone);
     }
 
     /** True when {@code --dump} asks for frames instead of a solve. */
@@ -349,8 +409,9 @@ public final class AutoLockpick {
         System.out.println("Each press starts from scratch. Quit with Ctrl-C.");
         System.out.println("NOTE: the hotkey is observed, not swallowed - the game receives F8 too.");
         System.out.println("Check F8 is unbound in the game's controls menu before you start.");
-        System.out.println("Reader calibrated for " + LockModel.MIN_PLATES + "-" + LockModel.MAX_PLATES
-                + " plate locks, every size verified against labelled frames from the real game.");
+        System.out.println("Reads " + LockModel.MIN_PLATES + "-" + LockModel.MAX_PLATES + " plate locks "
+                + "from the lock's own contrast, so it holds up at any gamma, in HDR, and at any size - "
+                + "every one verified against labelled frames from the real game.");
         System.out.println("=================================");
     }
 }
