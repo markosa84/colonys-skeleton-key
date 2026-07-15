@@ -1,15 +1,25 @@
 # Automation / screen-reader notes
 
-- **`LockReader` has a regression gate — run it after any change:** `gradlew test` (wired into
-  `check`/`build`) replays every labelled frame in `src/test/data/frames/` through
-  `LockReaderTest` and must stay green on **every one of the 244** (the 34-frame 4K calibration
-  census, the `6p-gap-shadow` regression frame, the 21-frame 7-plate census, the 161-frame
-  resolution sweep, and the 27-frame gamma corpus). Every constant in the reader is fitted to those
-  frames. To debug offline, `new LockReader(Viewport.REFERENCE)` is safe anywhere: it is pure
-  image analysis (all Robot captures live in `GameScreen`), so you can feed `ImageIO.read(...)`
-  images straight into `detectPlateCount` / `readCentered` / `readState`. Pixel constants in the
-  vision classes are 4K reference values mapped through `Viewport` at construction - edit the
-  reference constants, never the scaled instance fields.
+- **There are two readers behind `LockAnalyzer`, and `LatticeReader` is the default.** It reads the
+  lock from **ratios of the lock's own contrast** (tone-free), matches `LockReader` on every labelled
+  frame, and additionally reads HDR. `LockReader` is the pixel-calibrated reference, kept behind
+  `--reader=legacy` (and for `LockReader.luminance` and the reference constants `LatticeReader`
+  borrows). Both share the measured geometry in `FanGeometry`. If you touch photometry, change it in
+  the reader that owns it; if you touch geometry, it lives in `FanGeometry` and both readers move
+  together. **Do not delete `LockReader`** — it is the calibration reference and the corpus gate for
+  the measured constants everything else is derived from.
+
+- **Both readers have a regression gate — run it after any change:** `gradlew test` (wired into
+  `check`/`build`) replays every labelled frame in `src/test/data/frames/` through **both**
+  `LockReaderTest` and `LatticeReaderTest` and must stay green on **every one** (the 4K calibration
+  census, the `6p-gap-shadow` regression frame, the 7-plate census, the 161-frame resolution sweep,
+  and the gamma corpus). `LatticeReaderTest` also pins whole-corpus safety invariants: never a wrong
+  plate count, never a false pop, offsets always in range. To debug offline,
+  `new LatticeReader(Viewport.REFERENCE)` (or `LockReader`) is safe anywhere: pure image analysis
+  (all Robot captures live in `GameScreen`), so feed `ImageIO.read(...)` images straight into
+  `detectPlateCount` / `readCentered` / `readState`. `LatticeReader`'s constants are **ratios** (edit
+  them directly); `LockReader`'s and `FanGeometry`'s pixel constants are 4K reference values mapped
+  through `Viewport` at construction — edit the reference constants, never the scaled instance fields.
 
 - **Every colour and luminance constant assumes the CALIBRATED gamma, and `Tone` is what makes that
   true.** `new LockReader(viewport)` means "this frame is already at gamma 2.7" — right for the
@@ -110,11 +120,17 @@
 - **A missed pin does not read as "no lock". It reads as a SMALLER lock.** The fans of `n` and `n+2`
   share a lattice, so a 6-plate lock's pins cover a 4-plate fan exactly (and a 7-plate covers a
   5-plate). `detectPlateCount` takes the largest fan that fits, which is only safe while every pin is
-  seen — lose the faintest and it silently answers the smaller lock, which is far worse than finding
-  nothing: the session then drives a model with the wrong number of plates. `fanFits` checks one step
-  past each end, but **only on an uncluttered frame** (`CLUTTER_ALLOWANCE`): at low resolutions one pin
-  fragments into several blobs and a fragment lands on a neighbouring fan position. If you touch pin
-  detection, the frame to test against is `2048x1536/front-plate-sweep` (15 blobs for 5 pins).
+  seen — lose the two end pins (the faintest, and the ones a dark or HDR frame takes) and it silently
+  answers the smaller lock, which is far worse than finding nothing: the session then drives a model
+  with the wrong number of plates. A reporter's 6-plate chest read as 4, strained nine times, and
+  called *itself* stuck.
+  **The guard is `plateBeyond`, and it asks the hole rows, not the pins.** Pins cannot answer it: a
+  room's stray warm blobs land on a genuine lock's extension position at up to 14.8× the pin floor,
+  while a real outer pin drops to 0.89× — the sets overlap, so no size threshold exists, and the old
+  `CLUTTER_ALLOWANCE` "fixed" that by switching the check off on busy frames. A plate is a **row of six
+  holes**; measured, the row past a genuine end holds 0 and a real plate's holds 6. If you touch pin
+  detection, the frames to test against are `2048x1536/front-plate-sweep` (15 blobs for 5 pins) and
+  `LockReaderTest.aSixPlateLockWithBothEndPinsInvisibleIsNeverAFourPlateOne` (the reported bug).
 
 - **Approaches already tried and scrapped** (CLAUDE.md "Dead ends" has the detail): a "pin x →
   offset" reader (the pin never moves); drive-to-centre probing (a connected plate can block a plate
