@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.2.0](https://github.com/markosa84/colonys-skeleton-key/compare/v1.1.0...v1.2.0) (2026-07-15)
+
+
+### Features
+
+* **vision:** read the lock from its own contrast — tone-free reader, HDR-proof, now the default ([0ebb7ee](https://github.com/markosa84/colonys-skeleton-key/commit/0ebb7ee80d7242ba18df5294f43b27c9c066b136))
+* **vision:** tone-free lattice reader, HDR-proof, now the default ([d64fb64](https://github.com/markosa84/colonys-skeleton-key/commit/d64fb64e534d87ee8b50081b79f7edeaa09d6ee3))
+
+
+### Documentation
+
+* describe the two-reader seam and the new default ([b665e7d](https://github.com/markosa84/colonys-skeleton-key/commit/b665e7d1e8913021ed807843f0537aa09b68def8))
+
 ## [1.1.0](https://github.com/markosa84/colonys-skeleton-key/compare/v1.0.0...v1.1.0) (2026-07-13)
 
 
