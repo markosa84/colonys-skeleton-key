@@ -73,6 +73,37 @@ class LockSessionTest {
     }
 
     /**
+     * <b>A lock where nothing moves at all is not a hard lock - it is a misread one.</b> Every lock
+     * the game hands you is openable, so from any configuration at least one slide is legal. If no
+     * plate would move in either direction, the lock being driven is not the lock on screen.
+     *
+     * <p>A user hit exactly this: a 6-plate chest read as 4 plates (both end pins were too faint to
+     * see), nine strains against plates that were never going to move, and then the session shrugged
+     * and called the <i>lock</i> stuck. It must say what actually happened and save the frame, so the
+     * next report arrives with the evidence in it.
+     *
+     * <p>The truth model here is deadlocked in both directions on every plate - which the real game
+     * cannot produce, and that is the point: it is what a wrong model <i>looks like</i> from inside
+     * the session. Compare {@link #deadlockedLockCostsTwoStrainsAndStopsInsteadOfRetrying}, where two
+     * plates do move and the lock really is just stuck.
+     */
+    @Test
+    void aLockOnWhichNothingEverMovesIsReportedAsAMisreadAndDumped() {
+        // Plates 0 (+3) and 1 (-3) sit on the walls and every plate drags one or both of them, so
+        // every slide would push somebody off the track: nothing can move, either way, anywhere.
+        LockModel truth = LockModel.of(new int[] {3, -3, 0, 0},
+                rows(row(n(1)), row(n(0)), row(n(0), n(1)), row(n(0), n(1))));
+        FakeGame game = new FakeGame(truth, Skill.MASTER);
+
+        new LockSession(game, game, game).run();
+
+        assertEquals(game.plays, game.strains, "every slide strained: not one moved a plate");
+        assertTrue(game.dumps.contains("wrong-model"),
+                "a lock nothing moves on must be dumped as the reader bug it is, not shrugged at");
+        assertFalse(game.opened());
+    }
+
+    /**
      * The old failure mode: at UNTRAINED a break resets the puzzle to the exact configuration a
      * gamble just failed in, and a session without memory re-plays the same gamble until every
      * pick in the inventory is gone. The refusal memory must survive the reset.

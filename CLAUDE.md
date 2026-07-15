@@ -96,7 +96,7 @@ goes in one of the first three.
   change, 407/407 still green. (JUnit 6's breaking changes — Java 17 baseline, the removed
   `migrationsupport` module, FastCSV replacing univocity — touch nothing here.)
 - **`gradlew build` also enforces coverage** (`jacocoTestCoverageVerification`, wired into `check`):
-  **≥92% line, ≥90% branch**, currently at 94.2/91.4. `win32` is excluded from the report *and* the
+  **≥92% line, ≥90% branch**, currently at 94.3/91.8. `win32` is excluded from the report *and* the
   gate — it is the FFM boundary, and a test of it would test Windows. What is left uncovered is only
   what a headless JVM cannot reach: `AutoLockpick.main` (owns a `Robot`, a `Toolkit` and an endless
   loop) plus its display-owning helpers (`awtScale`, `screenSize`, `environment` — a headless JVM
@@ -159,6 +159,22 @@ connections and the game's real strain/break/reset rules.
   WALLCLOCK to speed anything up**; the real win is F8 not resetting.
 
 - **`vision/`** — everything pixels:
+  - **Two readers behind one seam (`LockAnalyzer`: `detectPlateCount`/`readCentered`/`readState`/
+    `describe`).** **`LatticeReader` is the default** (`--reader=lattice`); **`LockReader` is the
+    reference** (`--reader=legacy`). They agree on the measured geometry (extracted to `FanGeometry`)
+    and differ only in *photometry*. `LockReader` asks absolute questions (`isPin`'s `r>=130`,
+    `luminance<105`, pop `area>=250`) fitted at one gamma; `LatticeReader` asks only **ratios of the
+    lock's own contrast** (a hole is "much darker than the plate it is cut into", the plate measured
+    per-row off the frame), so it holds at any gamma, in **HDR**, and at any resolution. It matches
+    `LockReader` on all 190 labelled frames (1005/1005 offsets) *and* reads the HDR dumps
+    `LockReader` returns −1 on. It still uses `Tone`, but **only on-family** (a real gamma setting):
+    off-family (HDR, `Tone.isOffFamily()`) it ignores the curve — which cannot express HDR — and
+    reads raw. Two design rules it took a while to get right, both pinned by `LatticeReaderTest`:
+    the **tracing** gate ("plate or not?") is per-plate-local, the **void** gate ("how black shows
+    through?") is whole-frame-global (get them backwards and the ten smallest modes fail); and a
+    **popped plate counts as a plate even if the raised pin ate a hole** (the 800×600 fix). The pop
+    (`readCentered`) needs **two** gates agreeing (`pinDark` vs own plate, `discDark` vs frame range)
+    and over the corpus has **zero false pops** — see `tools/PopProbe2`, `tools/ReaderBench`.
   - **`Tone`** — the game's **gamma slider (1.2–3.2)**, measured off the frame and undone. Every
     colour/luminance gate in `LockReader` is an absolute number fitted at **gamma 2.7**, so both ends
     of the slider break it, from opposite directions: dark, the brass falls under `isPin`'s `r>=130`
@@ -191,9 +207,9 @@ connections and the game's real strain/break/reset rules.
     - It **refuses to guess**: no plausible panel ⇒ the calibrated tone and a loud note (which is also
       a hint that the *viewport* is wrong, since a wrong one leaves the box black). And a frame whose
       (ink, white) is **off the family curve** is called out: the slider moves both anchors together,
-      so an off-curve pair means a *second* setting is dimming the picture (`m_ColorBrightnessOffset`,
-      HDR, a display profile). The reporter's frames read ink 13 beside a white of 184, where the
-      family says 254 — still unexplained; see "Remaining".
+      so an off-curve pair means a *second* thing is dimming the picture. It is **HDR** — the frames of
+      three reporters now, and the family is 1-D and cannot express it. See "Remaining"; the curve has
+      to be measured before this can be fixed.
   - **`Viewport`** — the rectangle **the game draws into** (origin + size), plus the mapping from the
     calibrated 4K reference coordinates onto it: an **aspect-fit** (`scale = min(w/3840, h/2160)`,
     positions anchored to the view's centre; distances scale linearly, blob areas quadratically,
@@ -219,7 +235,10 @@ connections and the game's real strain/break/reset rules.
     - *Plate count.* The minigame frames the lock at a **fixed screen position**, so the reader
       finds the brass **pins** (warm blobs in a fixed box) at their calibrated **fan** positions
       (`FAN_CENTER` + `DEPTH_STEP`) and returns the largest 4–7 fan every position of which is
-      covered. Stray warm blobs (candles, wood) are simply left unmatched.
+      covered. Stray warm blobs (candles, wood) are simply left unmatched. A fan of 4 or 5 must
+      *also* pass `plateBeyond` — no **hole row** one step past either end — because those fans are
+      sub-lattices of the 6- and 7-plate ones and a lost end pin would otherwise answer the wrong,
+      smaller lock. See the dead end; it is the bug that cost a reporter nine strains.
     - *Which plates are centered* (`readCentered`). **A pin doesn't move with its plate's offset** —
       it only **pops up** (warm blob grows ~2.5×) when that plate is centered. The signal is binary:
       pin size says centered-or-not, never the magnitude.
@@ -300,6 +319,13 @@ connections and the game's real strain/break/reset rules.
       the ~4-5s animation out, the session re-homes the cursor, keeps every connection and every
       refusal, and carries on. It gives up after 5 broken picks (`MAX_PICKS`) — no lock in the
       game needs more.
+    - **A lock nothing moves on is a lock we MISREAD, and it says so.** Every lock the game hands you
+      is openable, so from any configuration some slide is legal. If the session runs out of moves to
+      try having never moved a single plate (`moves == 0`), the model is not the lock on screen — it
+      dumps the frame as `wrong-model` and reports a bug in *this tool*, rather than shrugging at the
+      lock. That is what the "Stuck" message used to do after a reporter's 4-plate model of a 6-plate
+      chest had strained nine times. A genuinely deadlocked lock still moves *some* plates, so the two
+      cases do not collide (`LockSessionTest` pins both).
 
 - **`win32/Win32`** — Foreign Function & Memory (FFM) bindings into `user32.dll`/`kernel32.dll`:
   `GetAsyncKeyState` (F8); the DPI calls (below); `GetClientRect` + `ClientToScreen`
@@ -478,16 +504,18 @@ others silently breaks the automation. `KeySenderTest` and `LockSolverTest` pin 
 
 ## Automated-mode status / gates
 
-**The reader is done**: `LockReaderTest` replays every labelled frame in `src/test/data/frames/` —
-the 34-frame 4K calibration census (3 plate-count frames plus 31 offset frames across four slide
-sequences, with a `readCentered` cross-check), the `6p-gap-shadow` regression frame (a live
-failure dump whose labels the user established by marking every hole), the **21-frame 4K 7-plate
-census** (three sequences, `7p-*`), the 161-frame resolution sweep (23 display modes × 7
-states), and the **27-frame `gamma` corpus** (the game's slider end to end — see below).
-`CaptureBoxTest` proves the capture box contains everything the reader samples — any plate
-count, any offsets, any viewport — with a safety belt. The full suite is **778 tests** across
-solver/vision/control/session and the root, and **every class outside `win32` is covered** (94.2%
-line / 91.4% branch, gated at 92/90 — see "Testing seams" below).
+**Both readers are done, and the default is now `LatticeReader`**: `LockReaderTest` and
+`LatticeReaderTest` each replay every labelled frame in `src/test/data/frames/` — the 4K calibration
+census, the `6p-gap-shadow` regression frame (a live failure dump whose labels the user established by
+marking every hole), the **4K 7-plate census** (`7p-*`), the 161-frame resolution sweep (23 display
+modes × 7 states), and the **27-frame `gamma` corpus** (the game's slider end to end — see below).
+`LatticeReader` matches `LockReader` frame-for-frame (190/190 plate counts, 1005/1005 offsets) and
+additionally reads HDR dumps `LockReader` returns −1 on; `LatticeReaderTest` also pins the
+whole-corpus safety invariants (never a wrong plate count, never a false pop, offsets in range).
+`CaptureBoxTest` proves the capture box contains everything the reader samples — any plate count, any
+offsets, any viewport — with a safety belt. The full suite is **~1750 tests** across
+solver/vision/control/session and the root, and **every class outside `win32` is covered** (94.9%
+line / 91.2% branch, gated at 94/90 — see "Testing seams" below).
 
 **The gamma slider is covered end to end** (`gamma/`, 27 frames, `src/test/data/frames/gamma/labels.txt`).
 The same 7-plate chest, the same key protocol, replayed at every setting from 1.2 to 3.2 — plus the
@@ -581,16 +609,26 @@ Full numbers, method and spread are in `docs/INTERNALS.md` "Measured timings". T
 
 Remaining:
 
-- **A frame darker than the gamma slider alone can make it is still unexplained.** The user who
-  reported the bug sends frames reading **ink 13 beside a white of 184**, where the measured family
-  says 254 at that ink. The slider moves both anchors together, so a second setting is dimming their
-  picture — `m_ColorBrightnessOffset` (which sits in `GameUserSettings.ini` right beside `m_Gamma`),
-  HDR, or a display profile. `Tone` says so in the sidecar and applies the nearest measured curve; it
-  is not always enough (on one of their three frames a pin stays too faint to see, and the reader then
-  correctly reports *nothing* rather than the wrong lock — see the fan-lattice dead end). **Two dumps
-  taken with `m_ColorBrightnessOffset` at its extremes came back byte-identical to the baseline**, so
-  either the setting does not reach the frame, or it did not take effect — that is the thread to pull.
-  What is needed is a real `--dump` (PNG + sidecar) from that user, not a JPEG re-upload.
+- **The frame darker than the gamma slider can make it is HDR, and the tone does not yet handle it.**
+  Three reporters now, all off the family: **ink 13/white 184**, **11/183**, **21/189**, **36/199**,
+  where the family says ~254 at those inks. Not `m_ColorBrightnessOffset` — two dumps at its extremes
+  came back **byte-identical** to the baseline, so it never reaches the frame. The evidence says the
+  capture is **HDR-tonemapped**:
+  - the pick-counter panel is **opaque** — its white plateau is flat (sd 0.4–4.4, the same as ours), so
+    the probe is sound and the picture really is being compressed, not the panel showing the room;
+  - diffuse white (that panel, which should be 255) lands at **183–199**, ~72–78%, exactly where an
+    SDR-mapped HDR reference white sits;
+  - and the **highlights are crushed**: the pin box holds **17–21%** of pixels above luminance 230 in
+    our fixtures and **0.2–0.5%** in theirs, a 30–100× drop, while single brass pixels still reach
+    r=255. Scaled-down SDR cannot do that; a tonemap with headroom above white can.
+
+  `Tone`'s family is **1-D (gamma only)**, so it mis-indexes these frames and applies a curve that is
+  **worse than nothing**: on the cold-room frame the raw pixels yield 3–4 detectable pins and the
+  corrected ones yield **zero** (the curve is steepest in the midtones, so it lifts the brass's blue
+  past its already-clipped red and the pixel stops being warm). Until it is fixed the reader correctly
+  reports *nothing* on these frames rather than a wrong lock. **The fix needs a measured curve**, from
+  matched HDR-on/HDR-off pairs on the dev machine — the same method that produced `Tone.FAMILY`, and
+  the *only* method: see the extrapolation dead end.
 - **Non-4K resolutions are sweep-validated, with caveats.** A live front-plate sweep of one
   5-plate lock reads exactly right at all 23 dev-machine display modes (800×600..4K, spanning
   16:9/16:10/4:3/5:4) — pinned by `LockReaderTest`'s 161 sweep fixtures. Caveats: one lock, one
@@ -651,18 +689,27 @@ centered** (it does not slide with the offset).
   frame had **7** — *worse than doing nothing*. Two closely-spaced dark anchors say nothing about the
   far end of the range. `Tone`'s curves are therefore **measured at every level** from matched frame
   pairs, and it **clamps** rather than extrapolates past the ends of the slider.
-- **A smaller fan is not a smaller lock.** Plate `i` of `n` sits at `(mid − i)` depth steps with
-  `mid = (n−1)/2`, so the fans of `n` and `n+2` **share a lattice**: a 6-plate lock's pins
-  (`±2.5, ±1.5, ±0.5`) *always* cover a 4-plate fan (`±1.5, ±0.5`), and a 7-plate always covers a
-  5-plate one. `detectPlateCount` disambiguates by taking the largest fan that fits — which works
-  only while **every** pin is seen. Lose the faintest one (which is exactly what a dark gamma does)
-  and it does not fail: it silently answers the **smaller lock**, handing the session a model with
-  the wrong number of plates to drive into walls until the picks run out. `fanFits` therefore also
-  checks one step past each end. **But only on a clean frame** — at 2048×1536 a single pin fragments
-  into several blobs (a real 5-plate lock yields **15**), one lands on a neighbouring fan position,
-  and the first version of this check rejected six perfectly good frames. Hence `CLUTTER_ALLOWANCE`.
-  Blob *size* cannot separate the two cases: the genuine 5-plate lock's pins measured `[54,53,56,98,42]px`
-  with a 54px blob on the extension, the misread 6-plate one `[58,29,39,41]px` with a 40px extension.
+- **A smaller fan is not a smaller lock — and only the HOLE ROWS can tell you so.** Plate `i` of `n`
+  sits at `(mid − i)` depth steps with `mid = (n−1)/2`, so the fans of `n` and `n+2` **share a
+  lattice**: a 6-plate lock's pins (`±2.5, ±1.5, ±0.5`) *always* cover a 4-plate fan (`±1.5, ±0.5`),
+  and a 7-plate always covers a 5-plate one. `detectPlateCount` takes the largest fan that fits, which
+  is right only while **every** pin is seen. Lose the two end pins — the faintest ones, and exactly
+  what a dark or HDR-tonemapped frame takes — and it does not fail: it silently answers the **smaller
+  lock**, hands the session a model with the wrong number of plates, and drives them into walls. This
+  is not hypothetical: a reporter's 6-plate chest read as **4 plates**, then took nine strains and
+  reported itself "Stuck".
+  - **Asking the pins what lies past the end of the fan cannot work, and the attempt was worse than
+    useless.** Measured over the whole corpus: a stray warm blob sits on a *genuine* 4/5-plate lock's
+    extension position at up to **14.8×** the pin-size floor (the front-plate-sweep room has something
+    warm exactly there), while a real outer pin at gamma 1.2 falls to **0.89×** it. The sets overlap
+    completely — no size threshold exists. `CLUTTER_ALLOWANCE` was the workaround, and what it really
+    did was **switch the check off on any busy frame**, which is the hole the wrong-model bug walked
+    through. It is gone. Don't reintroduce it.
+  - **A plate is a row of six holes, and nothing else in a room is.** `plateBeyond` asks the hole rows
+    instead: measured at every resolution, the row one step past a genuine 4/5-plate lock's end holds
+    **0** holes, and where a real plate sits it holds **6**. `PLATE_MIN_HOLES = 3` is the midpoint of
+    that. It costs one rotation, paid only when a fan of 4 or 5 actually fits (a 6- or 7-plate lock
+    never reaches it), so it is once per F8, not per poll.
 - **"No lock detected" over a frame that looks fine means the COORDINATES are wrong, not the pixels.**
   Do not go looking at thresholds. A viewport that describes the wrong rectangle cannot fail loudly —
   `detectPins` clamps its scan box to the frame, finds nothing, and returns -1, while the dump (the

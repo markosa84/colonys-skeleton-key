@@ -112,7 +112,7 @@ tasks.jacocoTestReport {
 
 /**
  * The gate, wired into `check`. It is a ratchet, not an aspiration: the thresholds sit just under
- * what the suite actually reaches (94.5% line / 92.7% branch), so a change that stops testing
+ * what the suite actually reaches (94.9% line / 91.2% branch), so a change that stops testing
  * something fails the build - while a gate nobody can pass would only teach everyone to ignore it.
  *
  * The few percent that stay missing are the code a headless test JVM cannot reach:
@@ -124,6 +124,11 @@ tasks.jacocoTestReport {
  *  - The `Robot`-backed halves of the seams (`RobotKeyboard`'s taps, `GameScreen`'s grabber) are
  *    pure delegation to a `Robot` that cannot even be constructed headless. What they delegate to is
  *    covered through the seam.
+ *  - `LatticeReader` (now the default reader) is validated against the whole labelled corpus by
+ *    `LatticeReaderTest`; the few branches that stay uncovered are defensive guards the real frames
+ *    do not reach (a plate found one step past a 4/5-plate fan, a sample window off the crop edge).
+ *    Branch coverage fell from 92.7% with the extra reader; the floor was not lowered to fit it, and
+ *    the line floor rose with the line coverage.
  */
 tasks.jacocoTestCoverageVerification {
     dependsOn(tasks.test)
@@ -133,7 +138,7 @@ tasks.jacocoTestCoverageVerification {
             limit {
                 counter = "LINE"
                 value = "COVEREDRATIO"
-                minimum = "0.92".toBigDecimal()
+                minimum = "0.94".toBigDecimal()
             }
             limit {
                 counter = "BRANCH"

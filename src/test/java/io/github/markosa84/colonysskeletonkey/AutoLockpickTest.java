@@ -17,6 +17,9 @@ import io.github.markosa84.colonysskeletonkey.control.Slider;
 import io.github.markosa84.colonysskeletonkey.control.Telemetry;
 import io.github.markosa84.colonysskeletonkey.solver.Move;
 import io.github.markosa84.colonysskeletonkey.vision.TestFrames;
+import io.github.markosa84.colonysskeletonkey.vision.LatticeReader;
+import io.github.markosa84.colonysskeletonkey.vision.LockReader;
+import io.github.markosa84.colonysskeletonkey.vision.Tone;
 import io.github.markosa84.colonysskeletonkey.vision.Viewport;
 import io.github.markosa84.colonysskeletonkey.win32.Win32;
 
@@ -90,6 +93,29 @@ class AutoLockpickTest {
         assertEquals(GAME, AutoLockpick.resolveGameProcess(new String[] {"--dump"}));
         assertEquals("other.exe",
                 AutoLockpick.resolveGameProcess(new String[] {"--dump", "other.exe"}));
+    }
+
+    // -- --reader ----------------------------------------------------------------------------------
+
+    /** The reader defaults to the relative one, and {@code --reader=legacy} names the old one. */
+    @Test
+    void theReaderDefaultsToLatticeAndYieldsToTheFlag() {
+        assertEquals("lattice", AutoLockpick.resolveReader(new String[] {}));
+        assertEquals("legacy", AutoLockpick.resolveReader(new String[] {"--reader=legacy"}));
+        assertEquals("lattice", AutoLockpick.resolveReader(new String[] {"--reader=lattice"}));
+        // The flag starts with --, so the game-process resolver must leave it alone rather than take
+        // it for the executable to gate on.
+        assertEquals(GAME, AutoLockpick.resolveGameProcess(new String[] {"--reader=legacy"}));
+    }
+
+    /** Only an explicit {@code legacy} builds the old reader; the default and any typo build the new one. */
+    @Test
+    void theAnalyzerFactoryPicksTheNamedReader() {
+        Viewport viewport = Viewport.REFERENCE;
+        assertTrue(AutoLockpick.analyzer("lattice", viewport, Tone.CALIBRATED) instanceof LatticeReader);
+        assertTrue(AutoLockpick.analyzer("legacy", viewport, Tone.CALIBRATED) instanceof LockReader);
+        assertTrue(AutoLockpick.analyzer("anything-else", viewport, Tone.CALIBRATED) instanceof LatticeReader,
+                "an unknown reader name falls back to the default reader, never to nothing");
     }
 
     // -- --dump ------------------------------------------------------------------------------------
@@ -327,6 +353,12 @@ class AutoLockpickTest {
         assertEquals(Optional.empty(), AutoLockpick.diagnoseArg(new String[] {"--diagnose"}),
                 "no frame named: not a diagnose run");
         assertEquals(Optional.empty(), AutoLockpick.diagnoseArg(new String[] {"other.exe"}));
+        // A flag between --diagnose and the frame must be stepped over, not taken for the frame.
+        assertEquals(Optional.of(Path.of("f.png")),
+                AutoLockpick.diagnoseArg(new String[] {"--diagnose", "--reader=lattice", "f.png"}));
+        assertEquals(Optional.empty(),
+                AutoLockpick.diagnoseArg(new String[] {"--diagnose", "--reader=lattice"}),
+                "a flag after --diagnose with no frame is still not a diagnose run");
     }
 
     /**
@@ -344,7 +376,7 @@ class AutoLockpickTest {
         assertTrue(log.contains("[3, 1, 2, 0, 3]"), "the offsets the sweep labels: " + log);
     }
 
-    /** A frame with no lock in it says so, and says which of the two reasons it is. */
+    /** A frame with no lock in it says so, and names the likely cause. */
     @Test
     void diagnoseOnAFrameWithNoLockExplainsItself(@TempDir Path dir) throws Exception {
         Path blank = dir.resolve("blank.png");
@@ -353,8 +385,8 @@ class AutoLockpickTest {
 
         String log = Stdout.capturing(() -> assertFalse(AutoLockpick.diagnose(blank)));
 
-        assertTrue(log.contains("0 warm blob"), log);
-        assertTrue(log.contains("wrong viewport"), "it must name the likely cause: " + log);
+        assertTrue(log.contains("No lock"), log);
+        assertTrue(log.contains("viewport is wrong"), "it must name the likely cause: " + log);
     }
 
     @Test

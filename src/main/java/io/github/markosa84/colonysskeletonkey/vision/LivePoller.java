@@ -10,9 +10,9 @@ import io.github.markosa84.colonysskeletonkey.control.LockPoller;
 public final class LivePoller implements LockPoller {
 
     private final GameScreen screen;
-    private final LockReader reader;
+    private final LockAnalyzer reader;
 
-    public LivePoller(GameScreen screen, LockReader reader) {
+    public LivePoller(GameScreen screen, LockAnalyzer reader) {
         this.screen = screen;
         this.reader = reader;
     }

@@ -1,7 +1,5 @@
 package io.github.markosa84.colonysskeletonkey.vision;
 
-import java.awt.Graphics2D;
-import java.awt.RenderingHints;
 import java.awt.image.BufferedImage;
 import java.util.ArrayList;
 import java.util.List;
@@ -66,34 +64,21 @@ import io.github.markosa84.colonysskeletonkey.solver.LockModel;
  * {@code 5p-plates-1-2-opposed/step-0}, and the frames of four slide sequences (5- and 6-plate
  * locks) where each frame differs from the last by exactly one plate step. See {@code LockReaderTest}.
  */
-public final class LockReader {
+public final class LockReader implements LockAnalyzer {
 
     /** Offset returned when a plate's hole row could not be read (see {@link #readState}). */
     public static final int UNKNOWN = LockModel.UNKNOWN;
 
     /** Dark holes per plate: the 7 holes minus the one the pin occupies. */
-    private static final int HOLES_PER_PLATE = 2 * LockModel.MAX_OFFSET;
+    private static final int HOLES_PER_PLATE = FanGeometry.HOLES_PER_PLATE;
 
-    // --- Reference (4K) lock geometry, calibrated from the labelled frames (4 rooms, 4/5/6
-    // --- plates). These are the measured values; the instance fields below are the same
-    // --- quantities mapped onto the actual viewport.
-
-    /**
-     * Screen position the plate fan is centred on. Plate {@code i} of {@code n} has its pin at
-     * {@code FAN_CENTER + (mid - i) * DEPTH_STEP}, with {@code mid = (n - 1) / 2} and {@code i = 0}
-     * the back-most plate. This holds regardless of any plate's offset (the pin never moves).
-     */
-    private static final double FAN_CENTER_X = 3090.0;
-    private static final double FAN_CENTER_Y = 798.0;
-
-    /** Per-plate screen step from one plate to the next, pointing toward the back of the fan. */
-    private static final double DEPTH_STEP_X = 58.9;
-    private static final double DEPTH_STEP_Y = -36.75;
+    // --- Photometry. Everything below is a pixel VALUE, fitted on one screen at gamma 2.7, and it
+    // --- is the fragile half of this class: the gamma slider moves every one of these numbers, and
+    // --- an HDR tonemap moves them further than any Tone curve can put back. Where the lock IS lives
+    // --- in FanGeometry, is measured rather than fitted, and has never had to change.
 
     // --- Pin detection ---
 
-    /** Screen box holding every 4-7 plate pin (the fan plus a little margin). */
-    private static final int RX0 = 2650, RY0 = 620, RX1 = 3520, RY1 = 1000;
     /** Merge radius for warm pixels into one pin blob, and the accepted blob pixel-count window. */
     private static final int CLUSTER_RADIUS = 24;
     private static final int PIN_MIN_PIXELS = 45;
@@ -105,52 +90,33 @@ public final class LockReader {
     private static final double MATCH_MAX_DIST = 26.0;
 
     /**
-     * How many blobs beyond the plates themselves a frame may hold before {@link #fanFits} stops
-     * believing what it sees one step past the end of a fan.
+     * How many holes must sit on the row one step past the end of a fan before {@link #plateBeyond}
+     * calls that a <b>plate</b> - and therefore calls the fan the middle of a bigger one.
      *
-     * <p>The pin box collects stray warm things - a candle, lit wood - and, at low resolutions, a
-     * single pin breaks into <b>several</b> blobs: at 2048x1536 the {@code CLUSTER_RADIUS} maps to
-     * ~13px while a pin's own warm pixels sit up to 14px apart, so a real 5-plate lock yields
-     * <b>15</b> blobs, one of which lands on a neighbouring fan position. In that frame an "extra
-     * pin one step out" means nothing. In a frame where the blobs are exactly the pins, it means a
-     * plate. Hence the allowance: 2 (so a fan of {@code n} tolerates its own {@code n} pins, the
-     * extension being tested for, and one stray) - clean frames get the check, cluttered ones fall
-     * back to the largest fan that fits, which is what they have always had.
+     * <p>The question "is there another plate out there?" used to be asked of the <i>pins</i>, and it
+     * cannot be: a pin is one small warm blob, and rooms are full of those. Measured over the whole
+     * corpus, a stray warm blob lands on a genuine 4/5-plate lock's extension position at up to
+     * <b>14.8x</b> the pin-size floor (the front-plate-sweep room has something warm sitting exactly
+     * there), while a real outer pin - at gamma 1.2 - falls to <b>0.89x</b> it. The two sets overlap
+     * completely, so no size threshold exists, and the {@code CLUTTER_ALLOWANCE} that used to paper
+     * over this simply <b>switched the check off</b> on any busy frame. That is the hole the
+     * wrong-model bug walked through.
+     *
+     * <p>A plate is not a warm dot: it is a <b>row of six holes on the hole lattice</b>. Ask that
+     * instead and the answer is unambiguous - measured across the corpus at every resolution, the row
+     * one step past a genuine 4/5-plate lock's end holds <b>0</b> holes, and where a real plate sits
+     * it holds <b>6</b>. A candle is not a row of holes. Three is the midpoint of a separation that
+     * wide.
      */
-    private static final int CLUTTER_ALLOWANCE = 2;
+    private static final int PLATE_MIN_HOLES = 3;
 
-    // --- Off-centre offset reading (rotate so hole rows are horizontal, then count dark holes) ---
-
-    /**
-     * Rotation (deg, about FAN_CENTER) that lays the hole rows horizontal and separates the plates.
-     * <b>Measured, not guessed</b>, by fitting all 1170 hole centroids in the labelled frames: the
-     * optimum is -30.15 deg and the safe band is about -32.5..-28.3, so -30 sits near its middle.
-     * Re-tuning it buys under a pixel. Per-plate optima span -28.26..-31.66 (perspective), which is
-     * why one angle cannot flatten every row. See CLAUDE.md "Rotation angle" before touching this.
-     * Angles are unaffected by uniform scaling, so this needs no viewport mapping.
-     */
-    private static final double ROT_DEG = -30.0;
-
-    /**
-     * Residual tilt of each row against the single global rotation, measured over the same
-     * 1170-hole census as {@link #ROT_DEG}: a plate's own optimal angle is
-     * {@code OPT_BASE_DEG + OPT_PER_DEPTH_DEG * depth} (depth in fan steps, positive toward the
-     * back), so after rotating by {@code ROT_DEG} a row's holes still climb along a line of slope
-     * {@code tan(ROT_DEG - opt(depth))} through its pin. Testing blobs against that line instead
-     * of a flat one keeps real holes within ~5px (flat: 11px at 4K, and an extrapolated 16.5px on
-     * a 7-plate lock's end rows), which is what lets {@link #ROW_MAX_DY} sit tight enough to
-     * reject gap shadows. Angles survive uniform scaling: no viewport mapping. See CLAUDE.md
-     * "Rotation angle".
-     */
-    private static final double OPT_BASE_DEG = -29.80;
-    private static final double OPT_PER_DEPTH_DEG = 0.70;
+    // --- Off-centre offset reading (rotate so hole rows are horizontal, then count dark holes).
+    // --- The rotation and the deskew are geometry, and live in FanGeometry.
 
     /** Luminance below which a pixel is a hole candidate. */
     private static final int HOLE_DARK_MAX = 105;
-    /** Accepted hole blob geometry (px). Measured 15-42 wide, 14-34 tall, 150-950 px area. */
-    private static final int HOLE_MIN_AREA = 150, HOLE_MAX_AREA = 950;
-    private static final int HOLE_MIN_W = 15, HOLE_MAX_W = 42;
-    private static final int HOLE_MIN_H = 14, HOLE_MAX_H = 34;
+    /** Accepted hole blob area (px). Measured 150-950; the width/height bounds are in FanGeometry. */
+    static final int HOLE_MIN_AREA = 150, HOLE_MAX_AREA = 950;
     /**
      * A real hole shows the near-black void behind the plate; the plate's own shadows (in the bent
      * end-tab, or the inter-plate gap) bottom out around 76. Measured: holes 0-50, shadows 76-96.
@@ -166,48 +132,20 @@ public final class LockReader {
     private static final int HOLE_MAX_MEAN_LUM = 88;
 
     /**
-     * A blob belongs to a row if it is within this many px of the row's <b>deskewed line</b> in y
-     * (see {@link #rowSlope}) and of the row's pin in x. The y bound is deliberately tight: real
-     * holes sit within ~5px of their line, while the arch-gap shadow that once broke a 6-plate
-     * read sat 24px off it. (It scales with the viewport but floors at 4px, the effective value
-     * the old flat 20px gate had at 800x600, so blob-centroid noise at tiny resolutions keeps its
-     * old room.) The x bound has headroom: the widest row measured (a 6-plate lock's front plate)
-     * reaches 304px, and a 7-plate lock's front plate sits one fan step nearer the camera. Being
-     * generous in x is safe - {@link #walk} discards anything off the hole lattice anyway.
+     * A double hole spacing, which {@link #walk} accepts to repair a single undetected hole mid-row.
+     * The single-step window itself is geometry ({@code FanGeometry.stepMin/Max/Ideal}).
      */
-    private static final int ROW_MAX_DY = 12;
-    private static final int ROW_MAX_DX = 345;
-
-    /**
-     * Extra margin around the rotated fan crop, beyond the row bounds above. The y pad also
-     * absorbs the deskewed lines' wander (up to ~12px at the far ends of the extreme rows), so
-     * 12 + 28 keeps the exact crop the old flat 20 + 20 had.
-     */
-    private static final int CROP_PAD_X = 25;
-    private static final int CROP_PAD_Y = 28;
-
-    /**
-     * Distance (px) between adjacent holes along a row. Perspective makes it vary with plate depth
-     * and position in the row (measured 41-54), so the walk accepts a window rather than one value.
-     * {@code SKIP_*} accepts a double step, repairing a single undetected hole mid-row.
-     */
-    private static final double STEP_MIN = 36, STEP_MAX = 62, STEP_IDEAL = 48;
-    private static final double SKIP_MIN = 80, SKIP_MAX = 118, SKIP_IDEAL = 96;
+    static final double SKIP_MIN = 80, SKIP_MAX = 118, SKIP_IDEAL = 96;
 
     // --- The same quantities, mapped onto the actual viewport ---
 
-    private final double fanCenterX, fanCenterY;
-    private final double depthStepX, depthStepY;
-    private final int rx0, ry0, rx1, ry1;
+    /** Where the lock is. Measured, shared with every other reader, and never fitted to a screen. */
+    private final FanGeometry geo;
     private final double clusterRadius;
     private final double pinMinPixels, pinMaxPixels;
     private final double centeredMinPixels;
     private final double matchMaxDist;
     private final double holeMinArea, holeMaxArea;
-    private final double holeMinW, holeMaxW, holeMinH, holeMaxH;
-    private final int rowMaxDy, rowMaxDx;
-    private final int cropPadX, cropPadY;
-    private final double stepMin, stepMax, stepIdeal;
     private final double skipMin, skipMax, skipIdeal;
 
     /**
@@ -226,14 +164,7 @@ public final class LockReader {
 
     public LockReader(Viewport viewport, Tone tone) {
         this.tone = tone;
-        fanCenterX = viewport.x(FAN_CENTER_X);
-        fanCenterY = viewport.y(FAN_CENTER_Y);
-        depthStepX = viewport.len(DEPTH_STEP_X);
-        depthStepY = viewport.len(DEPTH_STEP_Y);
-        rx0 = (int) Math.round(viewport.x(RX0));
-        ry0 = (int) Math.round(viewport.y(RY0));
-        rx1 = (int) Math.round(viewport.x(RX1));
-        ry1 = (int) Math.round(viewport.y(RY1));
+        this.geo = new FanGeometry(viewport);
         clusterRadius = viewport.len(CLUSTER_RADIUS);
         pinMinPixels = viewport.area(PIN_MIN_PIXELS);
         pinMaxPixels = viewport.area(PIN_MAX_PIXELS);
@@ -241,17 +172,6 @@ public final class LockReader {
         matchMaxDist = viewport.len(MATCH_MAX_DIST);
         holeMinArea = viewport.area(HOLE_MIN_AREA);
         holeMaxArea = viewport.area(HOLE_MAX_AREA);
-        holeMinW = viewport.len(HOLE_MIN_W);
-        holeMaxW = viewport.len(HOLE_MAX_W);
-        holeMinH = viewport.len(HOLE_MIN_H);
-        holeMaxH = viewport.len(HOLE_MAX_H);
-        rowMaxDy = Math.max(4, (int) Math.round(viewport.len(ROW_MAX_DY)));
-        rowMaxDx = (int) Math.round(viewport.len(ROW_MAX_DX));
-        cropPadX = (int) Math.round(viewport.len(CROP_PAD_X));
-        cropPadY = (int) Math.round(viewport.len(CROP_PAD_Y));
-        stepMin = viewport.len(STEP_MIN);
-        stepMax = viewport.len(STEP_MAX);
-        stepIdeal = viewport.len(STEP_IDEAL);
         skipMin = viewport.len(SKIP_MIN);
         skipMax = viewport.len(SKIP_MAX);
         skipIdeal = viewport.len(SKIP_IDEAL);
@@ -262,56 +182,51 @@ public final class LockReader {
 
     /** Expected pin position of plate {@code i} in an {@code n}-plate fan (offset-independent). */
     double[] pinPosition(int n, int i) {
-        double mid = (n - 1) / 2.0;
-        return new double[] {fanCenterX + (mid - i) * depthStepX,
-                             fanCenterY + (mid - i) * depthStepY};
+        return geo.pinPosition(n, i);
     }
 
     /** The pin-detection scan box, for {@code CaptureBoxTest}'s containment proof. */
     java.awt.Rectangle pinBox() {
-        return new java.awt.Rectangle(rx0, ry0, rx1 - rx0, ry1 - ry0);
+        return geo.pinBox();
     }
 
     /**
      * The screen-space bounding box of every source pixel {@link #readState} samples for an
-     * {@code n}-plate lock: the rotated fan crop, computed exactly as {@code readState} computes
-     * it, back-projected to the screen. It depends only on the plate count, never on offsets -
-     * the crop is sized from the row gates, which already span the whole track - so containment
-     * proven for a plate count holds for any lock state. {@code CaptureBoxTest} asserts that
-     * {@link GameScreen}'s capture box contains this (plus a safety belt) at every viewport.
+     * {@code n}-plate lock. {@code CaptureBoxTest} asserts that {@link GameScreen}'s capture box
+     * contains this (plus a safety belt) at every viewport.
      */
     java.awt.Rectangle fanCropScreenBounds(int n) {
-        double[][] rowPin = new double[n][];
-        for (int i = 0; i < n; i++) {
-            double[] pin = pinPosition(n, i);
-            rowPin[i] = rotatePoint(pin[0], pin[1], ROT_DEG);
-        }
-        int x0 = (int) rowPin[n - 1][0] - rowMaxDx - cropPadX;
-        int x1 = (int) rowPin[0][0] + rowMaxDx + cropPadX;
-        int y0 = (int) rowPin[0][1] - rowMaxDy - cropPadY;
-        int y1 = (int) rowPin[n - 1][1] + rowMaxDy + cropPadY;
-        double minX = Double.MAX_VALUE, minY = Double.MAX_VALUE;
-        double maxX = -Double.MAX_VALUE, maxY = -Double.MAX_VALUE;
-        for (double[] corner : new double[][] {{x0, y0}, {x1, y0}, {x0, y1}, {x1, y1}}) {
-            double[] screen = rotatePoint(corner[0], corner[1], -ROT_DEG);
-            minX = Math.min(minX, screen[0]);
-            maxX = Math.max(maxX, screen[0]);
-            minY = Math.min(minY, screen[1]);
-            maxY = Math.max(maxY, screen[1]);
-        }
-        return new java.awt.Rectangle((int) Math.floor(minX), (int) Math.floor(minY),
-                (int) Math.ceil(maxX - minX), (int) Math.ceil(maxY - minY));
+        return geo.fanCropScreenBounds(n);
     }
 
     /**
      * Detects the plate count by finding the brass pins. Since pins sit at fixed fan positions, it
      * returns the largest {@code n} (4-7) whose every fan position is covered by a pin - stray warm
      * blobs in the box are simply left unmatched. Returns -1 if no fan fits. Works at any offsets.
+     *
+     * <p>A fan that fits is not yet an answer, because the fans of {@code n} and {@code n + 2}
+     * <b>share a lattice</b> (see {@link #plateBeyond}): the largest fan that fits is only the right
+     * one while every pin is seen, and the pin that goes missing is always the faintest. So an
+     * {@code n} that could be the middle of a bigger fan must also show that <b>no plate</b> sits one
+     * step past either end - which is asked of the hole rows, not of the pins. That costs a rotation,
+     * so it is paid only when such an {@code n} actually fits: a 6- or 7-plate lock never reaches it.
      */
     public int detectPlateCount(BufferedImage img) {
         List<Pin> pins = detectPins(img);
+        List<double[]> holes = null;
         for (int n = LockModel.MAX_PLATES; n >= LockModel.MIN_PLATES; n--) {
-            if (fanFits(pins, n)) return n;
+            if (!fanFits(pins, n)) {
+                continue;
+            }
+            if (n + 2 > LockModel.MAX_PLATES) {
+                return n; // nothing bigger shares this lattice, so there is no ambiguity to resolve
+            }
+            if (holes == null) {
+                holes = fanHoles(img, LockModel.MAX_PLATES);
+            }
+            if (!plateBeyond(holes, n)) {
+                return n;
+            }
         }
         return -1;
     }
@@ -320,14 +235,15 @@ public final class LockReader {
      * Why {@link #detectPlateCount} said what it said, in prose - the first thing to look at when a
      * user reports "no lock detected" over a screenshot that looks perfectly fine.
      *
-     * <p>It answers the one question that separates the plausible causes, and it now leads with the
-     * {@link Tone} it read, because the two failures look alike from the outside. <b>No warm blobs at
+     * <p>It answers the one question that separates the plausible causes, and it leads with the
+     * {@link Tone} it read, because the failures look alike from the outside. <b>No warm blobs at
      * all</b> means the scan box is not over the lock (the viewport describes the wrong rectangle -
      * the game is not filling the display the tool measured), or the colours moved out from under
-     * {@code isPin}'s gates and the tone did not put them back (HDR, a shader mod - the game's own
-     * gamma slider is handled). <b>Blobs found but no fan fits</b> means they are in the wrong places
-     * relative to each other: the scale is wrong, so the viewport is wrong. <b>Blobs that fit</b> and
-     * the detector is happy, and the fault is elsewhere.
+     * {@code isPin}'s gates and the tone did not put them back. <b>Blobs found but no fan fits</b>
+     * is the ambiguous one, and it must not be read as a verdict on the viewport: it is equally what
+     * a frame whose <b>pins are too faint to all be seen</b> looks like, and that is what two real
+     * reports turned out to be. The pin positions below say which - they either land on a fan's
+     * lattice or they do not.
      */
     public String describe(BufferedImage img) {
         StringBuilder out = new StringBuilder();
@@ -345,26 +261,32 @@ public final class LockReader {
         if (pins.isEmpty()) {
             out.append("\n  -> Nothing brass-coloured in the box. Either the box is not over the "
                     + "lock (wrong viewport: is the game really filling this rectangle?), or the "
-                    + "frame's colours are shifted (HDR, gamma, a shader mod).");
+                    + "frame's colours are shifted (HDR, a shader mod - the gamma slider is handled).");
             return out.toString();
         }
         out.append('\n');
         for (Pin p : pins) {
             out.append(String.format(Locale.ROOT, "  at %.0f,%.0f  %dpx%n", p.x(), p.y(), p.size()));
         }
+        List<double[]> holes = fanHoles(img, LockModel.MAX_PLATES);
         for (int n = LockModel.MAX_PLATES; n >= LockModel.MIN_PLATES; n--) {
-            out.append(fanReport(pins, n));
+            out.append(fanReport(pins, holes, n));
         }
         int n = detectPlateCount(img);
         out.append(n < 0
-                ? "  -> No fan fits. Pins are there but not where any 4-7 plate lock puts them: "
-                        + "the scale or the origin is off, so the viewport is wrong."
+                ? "  -> No fan fits, so no lock was read. If the pins above sit a fan step apart on "
+                        + "one of the lattices, they ARE the lock and some of them were too faint to "
+                        + "see: the frame's colours, not its coordinates. If they are scattered "
+                        + "anywhere else, the scale or the origin is off and the viewport is wrong."
                 : "  -> " + n + " plates.");
         return out.toString();
     }
 
-    /** One line per plate count: which of its fan positions no pin covers, and whether it is the whole fan. */
-    private String fanReport(List<Pin> pins, int n) {
+    /**
+     * One line per plate count: which of its fan positions no pin covers, and - for a fan that could
+     * be the middle of a bigger one - what the rows one step past its ends hold.
+     */
+    private String fanReport(List<Pin> pins, List<double[]> holes, int n) {
         boolean[] used = new boolean[pins.size()];
         List<String> missing = new ArrayList<>();
         for (int i = 0; i < n; i++) {
@@ -388,14 +310,13 @@ public final class LockReader {
         }
         String beyond = "";
         if (n + 2 <= LockModel.MAX_PLATES) {
-            int back = matchPin(pins, used, n, -1);
-            int front = matchPin(pins, used, n, n);
-            if (back >= 0 || front >= 0) {
-                beyond = "  BUT a pin sits one step past the end ("
-                        + (back >= 0 ? pins.get(back).size() + "px behind" : "")
-                        + (back >= 0 && front >= 0 ? ", " : "")
-                        + (front >= 0 ? pins.get(front).size() + "px in front" : "")
-                        + "), so this may be the middle of a " + (n + 2) + "-plate fan";
+            int back = holesOnRow(holes, n, -1);
+            int front = holesOnRow(holes, n, n);
+            beyond = String.format(Locale.ROOT,
+                    "  (rows one step past the ends hold %d and %d holes)", back, front);
+            if (plateBeyond(holes, n)) {
+                beyond += ", so a PLATE sits past the end and this is the middle of a "
+                        + (n + 2) + "-plate fan";
             }
         }
         return String.format(Locale.ROOT, "  %d plates: every fan position covered [%s]px%s%n",
@@ -429,23 +350,15 @@ public final class LockReader {
 
         double[][] rowPin = new double[n][];
         for (int i = 0; i < n; i++) {
-            double[] pin = pinPosition(n, i);
-            rowPin[i] = rotatePoint(pin[0], pin[1], ROT_DEG);
+            rowPin[i] = geo.rowPin(n, i);
         }
-        // Rows run left-to-right, and plate 0 (back) rotates to the top of the fan.
-        int x0 = (int) rowPin[n - 1][0] - rowMaxDx - cropPadX;
-        int x1 = (int) rowPin[0][0] + rowMaxDx + cropPadX;
-        int y0 = (int) rowPin[0][1] - rowMaxDy - cropPadY;
-        int y1 = (int) rowPin[n - 1][1] + rowMaxDy + cropPadY;
-        List<double[]> holes = detectHoles(rotateFan(img, x0, y0, x1 - x0, y1 - y0), x0, y0);
+        List<double[]> holes = fanHoles(img, n);
 
         List<List<Double>> rows = new ArrayList<>();
         for (int i = 0; i < n; i++) rows.add(new ArrayList<>());
         for (double[] h : holes) {
             int row = nearestRow(rowPin, h[1]);
-            double lineY = rowPin[row][1] + (h[0] - rowPin[row][0]) * rowSlope(n, row);
-            if (Math.abs(h[1] - lineY) <= rowMaxDy
-                    && Math.abs(h[0] - rowPin[row][0]) <= rowMaxDx) {
+            if (onRow(h, rowPin[row], FanGeometry.rowSlope(n, row))) {
                 rows.get(row).add(h[0]);
             }
         }
@@ -467,10 +380,60 @@ public final class LockReader {
         return out;
     }
 
-    /** Residual slope of row {@code i}'s deskewed line in the rotated frame; see {@link #OPT_BASE_DEG}. */
-    private static double rowSlope(int n, int i) {
-        double depth = (n - 1) / 2.0 - i;
-        return Math.tan(Math.toRadians(ROT_DEG - (OPT_BASE_DEG + OPT_PER_DEPTH_DEG * depth)));
+    /**
+     * Every hole blob in the rotated crop of an {@code n}-plate fan, in rotated-frame coordinates.
+     * The crop is sized from the row gates, which already span the whole track, so it depends only on
+     * the plate count and never on the offsets - which is what lets {@link #detectPlateCount} take
+     * the {@link LockModel#MAX_PLATES} crop once and test any candidate's rows against it.
+     */
+    private List<double[]> fanHoles(BufferedImage img, int n) {
+        int[] crop = geo.fanCrop(n);
+        int x0 = crop[0], y0 = crop[1];
+        return detectHoles(geo.rotateFan(img, x0, y0, crop[2] - x0, crop[3] - y0), x0, y0);
+    }
+
+    /** True if a hole blob sits on the deskewed line of a row whose pin rotates to {@code rowPin}. */
+    private boolean onRow(double[] hole, double[] rowPin, double slope) {
+        double lineY = rowPin[1] + (hole[0] - rowPin[0]) * slope;
+        return Math.abs(hole[1] - lineY) <= geo.rowMaxDy
+                && Math.abs(hole[0] - rowPin[0]) <= geo.rowMaxDx;
+    }
+
+    /** How many holes sit on row {@code i} of an {@code n}-plate fan. {@code i} may be -1 or {@code n}. */
+    private int holesOnRow(List<double[]> holes, int n, int i) {
+        double[] rowPin = geo.rowPin(n, i);
+        double slope = FanGeometry.rowSlope(n, i);
+        int count = 0;
+        for (double[] h : holes) {
+            if (onRow(h, rowPin, slope)) {
+                count++;
+            }
+        }
+        return count;
+    }
+
+    /**
+     * True if a <b>plate</b> sits one step past either end of an {@code n}-plate fan - which makes
+     * this fan the middle of an {@code (n + 2)}-plate one, and {@code n} the wrong answer.
+     *
+     * <p>Plate {@code i} of {@code n} sits at {@code (mid - i)} depth steps with {@code mid = (n-1)/2},
+     * so the fans of {@code n} and {@code n + 2} share a lattice: a 6-plate lock's pins sit at
+     * {@code +-2.5, +-1.5, +-0.5} steps and therefore <b>always cover a 4-plate fan</b>
+     * ({@code +-1.5, +-0.5}) as well; a 7-plate lock always covers a 5-plate one. Taking the largest
+     * fan that fits works only while every pin is seen - and lose the two end pins, which is exactly
+     * what a dark or HDR-tonemapped frame does to the faintest ones, and the reader does not fail: it
+     * silently answers the <b>smaller lock</b>, hands the session a model with the wrong number of
+     * plates, and drives them into walls until the picks run out. A real report did precisely that -
+     * a 6-plate chest read as 4 plates, nine strains, "Stuck".
+     *
+     * <p>So the fan must show that nothing is out there, and the pins cannot show it: see
+     * {@link #PLATE_MIN_HOLES} for why (rooms are full of warm dots, and the check that asked about
+     * them had to be switched off on any busy frame to stop it rejecting good locks). The hole rows
+     * can, because a plate is a row of six holes and nothing else in a room is.
+     */
+    private boolean plateBeyond(List<double[]> holes, int n) {
+        return holesOnRow(holes, n, -1) >= PLATE_MIN_HOLES
+                || holesOnRow(holes, n, n) >= PLATE_MIN_HOLES;
     }
 
     /** Index of the row whose (rotated) pin is closest in y to {@code y}. */
@@ -500,10 +463,10 @@ public final class LockReader {
             int bestSlots = 0;
             for (double x : rowHoles) {
                 double d = (x - cur) * dir;
-                int step = (d >= stepMin && d <= stepMax) ? 1
+                int step = (d >= geo.stepMin && d <= geo.stepMax) ? 1
                         : (allowSkip && d >= skipMin && d <= skipMax) ? 2 : 0;
                 if (step == 0) continue;
-                double err = Math.abs(d - (step == 1 ? stepIdeal : skipIdeal));
+                double err = Math.abs(d - (step == 1 ? geo.stepIdeal : skipIdeal));
                 if (err < bestErr) {
                     bestErr = err;
                     bestX = x;
@@ -568,7 +531,8 @@ public final class LockReader {
             }
             int bw = maxX - minX + 1, bh = maxY - minY + 1;
             if (area < holeMinArea || area > holeMaxArea
-                    || bw < holeMinW || bw > holeMaxW || bh < holeMinH || bh > holeMaxH
+                    || bw < geo.holeMinW || bw > geo.holeMaxW
+                    || bh < geo.holeMinH || bh > geo.holeMaxH
                     || minLum > HOLE_MAX_MIN_LUM || sumLum / area > HOLE_MAX_MEAN_LUM) {
                 continue;
             }
@@ -577,31 +541,9 @@ public final class LockReader {
         return out;
     }
 
-    /**
-     * Rotates the frame by {@link #ROT_DEG} about the fan centre and returns only the {@code w x h}
-     * crop whose top-left is rotated-frame {@code (x0, y0)} (bilinear).
-     */
-    private BufferedImage rotateFan(BufferedImage src, int x0, int y0, int w, int h) {
-        BufferedImage o = new BufferedImage(w, h, BufferedImage.TYPE_INT_RGB);
-        Graphics2D g = o.createGraphics();
-        g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR);
-        g.translate(-x0, -y0);
-        g.rotate(Math.toRadians(ROT_DEG), fanCenterX, fanCenterY);
-        g.drawImage(src, 0, 0, null);
-        g.dispose();
-        return o;
-    }
-
-    /** Rotates a point by {@code deg} about the fan centre. */
-    private double[] rotatePoint(double px, double py, double deg) {
-        double t = Math.toRadians(deg), c = Math.cos(t), s = Math.sin(t);
-        double x = px - fanCenterX, y = py - fanCenterY;
-        return new double[] {fanCenterX + x * c - y * s, fanCenterY + x * s + y * c};
-    }
-
     /** Index of the unused detected pin closest to plate {@code i}'s fan position, or -1. */
     private int matchPin(List<Pin> pins, boolean[] used, int n, int i) {
-        double[] c = pinPosition(n, i);
+        double[] c = geo.pinPosition(n, i);
         int best = -1;
         double bestD = matchMaxDist;
         for (int j = 0; j < pins.size(); j++) {
@@ -616,22 +558,9 @@ public final class LockReader {
     }
 
     /**
-     * True if the pins are exactly an {@code n}-plate fan: every position covered, <b>and no pin
-     * where the next plate out would be</b>.
-     *
-     * <p>That second half is not paranoia, it is the geometry. Plate {@code i} of {@code n} sits at
-     * {@code (mid - i)} depth steps with {@code mid = (n-1)/2}, so the fans of {@code n} and
-     * {@code n+2} share a lattice: a 6-plate lock's pins sit at {@code +-2.5, +-1.5, +-0.5} steps and
-     * therefore <b>always cover a 4-plate fan</b> ({@code +-1.5, +-0.5}) as well; a 7-plate lock
-     * always covers a 5-plate one. {@link #detectPlateCount} disambiguates by taking the largest fan
-     * that fits - which works only while every pin is seen.
-     *
-     * <p>Lose one end pin, and it does not fail: it silently answers the <b>smaller</b> lock. A
-     * 6-plate lock read as 4 plates hands the session a model with the wrong number of plates, and
-     * it drives the wrong plates into walls until the picks run out. That is far worse than "no lock
-     * detected", and a faint pin is exactly what a dark gamma produces - it is how a real reported
-     * frame reads. So a fan with a pin sitting one step past either end is not that fan; it is the
-     * middle of a bigger one, and the honest answer is to find nothing.
+     * True if every fan position of an {@code n}-plate lock is covered by a detected pin. Stray warm
+     * blobs are simply left unmatched - and whether the fan is the <b>whole</b> lock or merely the
+     * middle of a bigger one is not a question the pins can answer: {@link #plateBeyond} does that.
      */
     private boolean fanFits(List<Pin> pins, int n) {
         boolean[] used = new boolean[pins.size()];
@@ -640,13 +569,7 @@ public final class LockReader {
             if (j < 0) return false;
             used[j] = true;
         }
-        if (n + 2 > LockModel.MAX_PLATES) {
-            return true; // nothing bigger shares this lattice, so there is no ambiguity to resolve
-        }
-        if (pins.size() > n + CLUTTER_ALLOWANCE) {
-            return true;
-        }
-        return matchPin(pins, used, n, -1) < 0 && matchPin(pins, used, n, n) < 0;
+        return true;
     }
 
     /**
@@ -656,8 +579,8 @@ public final class LockReader {
     List<Pin> detectPins(BufferedImage img) {
         // A correctly mapped viewport keeps the box inside the frame; the clamp makes a
         // mis-assumed aspect ratio read "no lock" instead of crashing on an out-of-bounds pixel.
-        int yLo = Math.max(ry0, 0), yHi = Math.min(ry1, img.getHeight());
-        int xLo = Math.max(rx0, 0), xHi = Math.min(rx1, img.getWidth());
+        int yLo = Math.max(geo.ry0, 0), yHi = Math.min(geo.ry1, img.getHeight());
+        int xLo = Math.max(geo.rx0, 0), xHi = Math.min(geo.rx1, img.getWidth());
         List<double[]> clusters = new ArrayList<>(); // {x, y, count}
         for (int y = yLo; y < yHi; y++) {
             for (int x = xLo; x < xHi; x++) {

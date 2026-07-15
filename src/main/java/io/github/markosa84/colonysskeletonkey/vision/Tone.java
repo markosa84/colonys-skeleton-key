@@ -170,6 +170,19 @@ public final class Tone {
         return ink == NOT_PROBED;
     }
 
+    /**
+     * True when this frame is darker (or brighter) than the gamma slider alone can explain: the
+     * panel's white sits more than {@link #OFF_FAMILY} levels from where its ink says it should. The
+     * family is one-dimensional - gamma only - so it cannot map such a frame back to the calibrated
+     * look, and {@link #map} applies the nearest curve knowing it may be "worse than nothing" (see the
+     * class doc's HDR note). It is here so a reader can take a tone-free path instead of trusting a
+     * curve that does not fit - which is exactly what {@link LatticeReader} does with it.
+     */
+    public boolean isOffFamily() {
+        int expected = expectedWhite(ink);
+        return expected >= 0 && Math.abs(white - expected) > OFF_FAMILY;
+    }
+
     /** What the probe read off the panel. For the tests, and for a bug report. */
     int ink() {
         return ink;
@@ -209,8 +222,8 @@ public final class Tone {
                 + "the calibration, so every frame is mapped back to it.",
                 ink, white, CALIBRATED_INK, CALIBRATED_WHITE,
                 ink > CALIBRATED_INK ? "brighter" : "darker");
-        int expected = expectedWhite(ink);
-        if (expected >= 0 && Math.abs(white - expected) > OFF_FAMILY) {
+        if (isOffFamily()) {
+            int expected = expectedWhite(ink);
             read += String.format(Locale.ROOT,
                     "%n         NOTE: at ink %d the panel's white should be about %d, not %d. This "
                     + "frame is %s than the gamma slider alone can make it, so something else is "
