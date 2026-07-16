@@ -4,13 +4,17 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 
+import java.util.concurrent.TimeUnit;
+
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import io.github.markosa84.colonysskeletonkey.Stdout;
 import io.github.markosa84.colonysskeletonkey.solver.Connection;
 import io.github.markosa84.colonysskeletonkey.solver.LockModel;
+import io.github.markosa84.colonysskeletonkey.solver.LockSolver;
 import io.github.markosa84.colonysskeletonkey.solver.Move;
 import io.github.markosa84.colonysskeletonkey.solver.TestLocks;
 
@@ -101,6 +105,90 @@ class LockSessionTest {
         assertTrue(game.dumps.contains("wrong-model"),
                 "a lock nothing moves on must be dumped as the reader bug it is, not shrugged at");
         assertFalse(game.opened());
+    }
+
+    /**
+     * <b>The endless loop, reproduced and defused.</b> On a frame darker than the calibration corpus a
+     * reporter watched the tool slide one plate left and right forever until he alt-tabbed. The cause
+     * was a misread offset: a slide the reader called safe (nothing at either end) still strained,
+     * which recorded a refusal whose culprit set was empty - and an empty culprit never expires, so the
+     * plate was wedged permanently, while the unblock planner kept "freeing" a plate that was already
+     * free. Here the reader is made to misread plate 3 (always +3) as interior, so plate 4 looks free
+     * yet strains whenever it drags plate 3 off its end. The run must <b>stop</b> - bounded, with the
+     * frame saved as a misread - not spin. The timeout is the real assertion: without the fix this
+     * test never returns.
+     */
+    @Test
+    @Timeout(value = 15, unit = TimeUnit.SECONDS)
+    void aMisreadThatFakesASafeMoveStopsInsteadOfLooping() {
+        // Plates 3 and 4 are mutually locked at the +3 end (each drags the other off it); plates 0-2
+        // drag nothing. The reader is told plate 3 sits interior, so plate 4 reads as free to slide.
+        LockModel truth = LockModel.of(new int[] {1, 1, 1, 3, 3},
+                rows(row(), row(), row(), row(i(4)), row(i(3))));
+        FakeGame game = new FakeGame(truth, Skill.MASTER);
+        game.misread = s -> {
+            if (s[3] == 3) s[3] = 1; // the one wrong offset that makes an impossible move look safe
+            return s;
+        };
+
+        String log = Stdout.capturing(() -> new LockSession(game, game, game).run());
+
+        assertFalse(game.opened(), "an impossible-to-read lock cannot be opened, only reported");
+        assertTrue(game.dumps.contains("misread"),
+                "a run of strains the read called impossible must be saved as a misread, " + game.dumps);
+        assertTrue(log.contains("misreading"), log);
+    }
+
+    /**
+     * <b>The premature "stuck", opened.</b> A solvable five-plate lock where the strain-free strategy
+     * dead-ends: plates 1, 2 and 4 are frozen at one end (each drags another off it) and can only be
+     * freed by dragging them with plate 3 - but the gamble that probes plate 0 first drags plate 3 to
+     * its own end, where its freeing direction goes off-track. The old code reported "stuck: no move
+     * left to try" here. The escalation walks plate 0 back until plate 3 is interior again, gambles it,
+     * and the lock comes open - within the gamble budget, so no pick is lost.
+     */
+    @Test
+    void aDiscoveryDeadlockIsOpenedByRepositioning() {
+        // A real solvable five-plate lock (found by search over random connections at a stranding
+        // start) where the strain-free strategy dead-ends: after probing what it safely can, every
+        // remaining gamble is off-track or already refused, so the old code reported "stuck". The
+        // escalation shuffles the understood plates until an unprobed one can be gambled afresh.
+        LockModel truth = LockModel.of(new int[] {2, 2, -3, -3, -3},
+                rows(row(n(4)), row(i(3), n(4)), row(n(0), n(1), i(4)), row(), row(i(3))));
+        assertTrue(LockSolver.solve(truth) != null, "the test lock must itself be openable");
+        FakeGame game = new FakeGame(truth, Skill.MASTER);
+
+        String log = Stdout.capturing(() -> new LockSession(game, game, game).run());
+
+        assertTrue(game.opened(), "reposition-then-gamble must open it, left at "
+                + Arrays.toString(game.state) + "\n" + log);
+        assertTrue(log.contains("repositioning"), "the deadlock must be broken by the escalation, not "
+                + "the ordinary strategy\n" + log);
+        assertEquals(0, game.breaks, "the gamble budget keeps it well short of a broken pick");
+    }
+
+    /**
+     * The verbose trace the run log carries for a bug report: a line per move with the tier that chose
+     * it and the state before and after, the solution plan when it is computed, and the learned model
+     * at the end. It is what turns "it got stuck" into a report someone can act on.
+     */
+    @Test
+    void theTraceRecordsEveryMoveAndTheLearnedModel() throws Exception {
+        LockModel truth = LockModel.of(new int[] {2, 2, -3, -3, -3},
+                rows(row(n(4)), row(i(3), n(4)), row(n(0), n(1), i(4)), row(), row(i(3))));
+        FakeGame game = new FakeGame(truth, Skill.MASTER);
+        java.io.ByteArrayOutputStream buf = new java.io.ByteArrayOutputStream();
+        LockSession session = new LockSession(game, game, game);
+        session.traceTo(new java.io.PrintStream(buf, true, "UTF-8"));
+
+        Stdout.capturing(session::run);
+
+        String trace = buf.toString("UTF-8");
+        assertTrue(game.opened());
+        assertTrue(trace.contains("detected 5 plates"), trace);
+        assertTrue(trace.contains("step 1 ["), "a move-by-move trace with tiers: " + trace);
+        assertTrue(trace.contains("[solving]") && trace.contains("solve from"), trace);
+        assertTrue(trace.contains("model, as learned:"), trace);
     }
 
     /**
@@ -251,6 +339,9 @@ class LockSessionTest {
 
         assertFalse(game.opened());
         assertTrue(log.contains("No strain-free solution exists"), log);
+        // Live, a real lock is always openable, so a fully-learned model that will not solve means a
+        // misread while probing - saved as evidence rather than shrugged at as a hard lock.
+        assertTrue(game.dumps.contains("unsolvable-model"), game.dumps.toString());
     }
 
     /**

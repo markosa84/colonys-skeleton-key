@@ -6,7 +6,10 @@ import java.awt.Robot;
 import java.awt.Toolkit;
 import java.awt.image.BufferedImage;
 import java.io.IOException;
+import java.io.PrintStream;
 import java.nio.file.Path;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.Arrays;
 import java.util.Locale;
 import java.util.Optional;
@@ -126,13 +129,18 @@ public final class AutoLockpick {
                 if (dumping) {
                     dump(Win32::foregroundProcessName, gameProcess, view);
                 } else {
-                    run(slider.telemetry(), Win32::foregroundProcessName, gameProcess, () -> {
-                        // Only inside the body, so it names the game's window and not some other
-                        // window that happened to be focused when the gate turned the press away.
-                        System.out.println("Reading the game's view at " + viewport + ".");
-                        System.out.println(tone.describe());
-                        new LockSession(view, keys, slider).run();
-                    });
+                    Path logFile = Path.of("captures",
+                            "f8-" + LocalDateTime.now().format(LOG_STAMP) + ".log");
+                    RunLog log = RunLog.open(logFile, System.out);
+                    String describe = describeOrWhyNot(reader, screen.capture());
+                    solveLogged(log, System.out, slider.telemetry(), Win32::foregroundProcessName,
+                            gameProcess, () -> {
+                                solveHeader(version(), readerKind, viewport, tone,
+                                        environment(gameProcess, dpi), describe, log.detail());
+                                LockSession session = new LockSession(view, keys, slider);
+                                session.traceTo(log.detail()); // null-safe: no file, no trace
+                                session.run();
+                            });
                 }
             }
             Thread.sleep(POLL_MS);
@@ -366,6 +374,89 @@ public final class AutoLockpick {
         return true;
     }
 
+    private static final DateTimeFormatter LOG_STAMP = DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss");
+
+    /**
+     * Runs a solve and saves everything it printed to {@code captures/f8-<time>.log}, so a bug report
+     * is one self-contained file rather than a console the player has to scroll back through and paste
+     * before the useful lines scroll off. The console keeps the headline story; the file additionally
+     * carries the full environment, the reader's own account of the frame, and a move-by-move trace -
+     * the difference between "it got stuck" and a fixable report.
+     *
+     * <p>The one part that has to live here, in the untestable composition root, is the {@link RunLog}
+     * wiring: the frame grab behind {@code reader.describe}, and installing the tee as {@link System#out}
+     * for the duration. Everything with a branch in it - the tee, the fallback when no file opens, the
+     * keep-or-delete - is in {@link RunLog}, and the header text is in {@link #solveHeader}.
+     */
+    static void solveLogged(RunLog log, PrintStream console, Telemetry telemetry,
+            Supplier<String> foreground, String gameProcess, Runnable body) {
+        PrintStream previous = System.out;
+        System.setOut(log.out()); // for the run's duration, every println also reaches the file
+        boolean started;
+        try {
+            started = run(telemetry, foreground, gameProcess, body);
+        } finally {
+            System.setOut(previous);
+        }
+        if (started) {
+            log.keep(); // an ignored press is not worth a file
+        }
+        log.close();
+        if (started && log.hasFile()) {
+            console.println("  full log saved to " + log.path().toAbsolutePath()
+                    + " - attach it (with any captures\\*.png) to a bug report.");
+        }
+    }
+
+    /** The reader's account of one frame, or why it could not be had - never throws. */
+    static String describeOrWhyNot(LockAnalyzer reader, BufferedImage frame) {
+        try {
+            return reader.describe(frame);
+        } catch (RuntimeException e) {
+            return "reader.describe failed: " + e;
+        }
+    }
+
+    /**
+     * The head of a solve log: version and reader on the console (so a pasted snippet still says which
+     * build it is), and - to the file only, as it is too much for the console - the full environment
+     * and the reader's blob-by-blob account of the frame. That account is the first thing to read when
+     * a lock is misread, and until now it was written only when a failure dumped a frame. Pure text, so
+     * it is testable without a screen: the frame grab and the environment are gathered by the caller.
+     */
+    static void solveHeader(String version, String readerKind, Viewport viewport, Tone tone,
+            String environment, String describe, PrintStream detail) {
+        System.out.println("The Colony's Skeleton Key " + version + " | reader: " + readerKind);
+        System.out.println("Reading the game's view at " + viewport + ".");
+        System.out.println(tone.describe());
+        // tone.describe()'s "mapped back / may not be enough" is the legacy reader's story. The default
+        // reads the lock's own contrast and ignores the curve on an off-family frame, so say so.
+        if (!"legacy".equals(readerKind) && tone.isOffFamily()) {
+            System.out.println("         (The default reader ignores that curve and reads the lock's "
+                    + "own contrast, so the darkness is not mis-corrected - but a very dark frame can "
+                    + "still shrink that contrast below what the reader needs.)");
+        }
+        if (detail == null) {
+            return;
+        }
+        detail.println();
+        detail.println(environment);
+        detail.printf(Locale.ROOT, "viewport: %s (scale %.4f from the 4K calibration)%n%n",
+                viewport, viewport.scale());
+        detail.println(describe);
+        detail.println();
+    }
+
+    /**
+     * The build this is, for the banner and every run log - the first thing a bug report needs. Read
+     * from the jar manifest ({@code Implementation-Version}, set by the build); {@code "dev"} when run
+     * from classes with no manifest ({@code gradlew run}, the tests).
+     */
+    static String version() {
+        String v = AutoLockpick.class.getPackage().getImplementationVersion();
+        return v == null || v.isBlank() ? "dev" : v;
+    }
+
     /**
      * The focus gate, shared by every F8 body: true only while the game owns the focused window.
      * Says who does own it otherwise, because "F8 did nothing" is the least useful bug report there
@@ -398,7 +489,7 @@ public final class AutoLockpick {
     }
 
     static void printBanner(String gameProcess, String dpi) {
-        System.out.println("=== The Colony's Skeleton Key ===");
+        System.out.println("=== The Colony's Skeleton Key " + version() + " ===");
         System.out.println("Nothing to configure: broken picks are read off the lockpick counter, so "
                 + "the tool works at any lockpicking skill and notices if you train it.");
         System.out.println("Play at any resolution, windowed or borderless: each F8 measures the "

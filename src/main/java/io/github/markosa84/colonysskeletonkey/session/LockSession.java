@@ -1,5 +1,6 @@
 package io.github.markosa84.colonysskeletonkey.session;
 
+import java.io.PrintStream;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -9,6 +10,7 @@ import java.util.Deque;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 
@@ -47,13 +49,27 @@ import io.github.markosa84.colonysskeletonkey.solver.Move;
  *   <li><b>Planned</b> - breadth-first search for moves of <i>already-probed</i> plates that clear the
  *       ends for some unprobed plate. Their rows are known, so {@link LockSolver#applyMove} proves each
  *       move legal before a key is pressed. Costs time, never a pick.</li>
- *   <li><b>Gamble</b> - only when neither exists. Fewest plates at ends first, sliding toward centre
+ *   <li><b>Gamble</b> - when neither exists. Fewest plates at ends first, sliding toward centre
  *       so plates walk off the ends and the next move is safer.</li>
+ *   <li><b>Reposition then gamble</b> ({@link #escalate}) - the last resort, and what keeps a solvable
+ *       lock from reporting "stuck". Probing one interior plate can drag another to an end, where its
+ *       only informative direction goes off-track and discovery dead-ends. So search the moves of
+ *       already-probed plates for a configuration in which an unprobed plate can be gambled in a
+ *       direction not already ruled out, go there, and gamble. Capped by {@link #MAX_GAMBLE_STRAINS}
+ *       so a hard lock can never eat the inventory.</li>
  * </ol>
  * A gamble that strains is remembered and never retried while the plate that blocked it could still be
  * blocking it ({@link #isRefused}). <b>That memory survives a broken pick</b>, which is what stops the
  * reset from recreating the very gamble that just failed - the old failure mode where a hard lock ate
  * every pick in the player's inventory.
+ *
+ * <p><b>A strain the read says is impossible is a misread, not a refusal.</b> A slide can only strain by
+ * dragging a plate off an end, so a strain with nothing at either end contradicts the geometry that made
+ * the move look safe. Recording it as a refusal would wedge the run - an empty culprit set never expires
+ * ({@link #isRefused}) - which, with an unblock planner that kept "freeing" an already-free plate, was
+ * the endless one-step oscillation a reporter had to alt-tab out of. Instead it is counted, and enough
+ * of them stops the run with the frame saved as a misread. A whole-run {@link #loopingWithoutProgress}
+ * guard catches any residual no-progress cycle, and every give-up now saves a frame for the report.
  *
  * <h2>Unreadable rows (occlusion)</h2>
  * A settled state can arrive with {@link LockModel#UNKNOWN} entries: the reader refuses to guess
@@ -96,6 +112,21 @@ public final class LockSession {
     private static final int MAX_SEARCH_STATES = 200_000;
     /** Nudges tried per recovery before declaring a hidden row unrecoverable. */
     private static final int MAX_NUDGES = 3;
+    /**
+     * Contradictory strains tolerated before the frame is called misread. A slide can only strain by
+     * dragging a plate off an end, so a strain the read says is impossible (nothing sat at an end) is
+     * a misread, not a fact of the lock - see {@link #step}. A handful can be a transient; a run of
+     * them is a reader that cannot be trusted on this frame, and the honest thing is to stop and dump.
+     */
+    private static final int MAX_MISREAD_STRAINS = 4;
+    /**
+     * Strains the last-resort reposition-and-gamble escalation ({@link #escalate}) may spend before it
+     * gives up. Well under {@link #MAX_PICKS}, so a hard lock can never eat the inventory - the failure
+     * mode this codebase exists to avoid - while still buying the extra reach that opens locks the
+     * strain-free strategy dead-ends on. A gamble that <i>succeeds</i> costs nothing here; only a
+     * failed one counts.
+     */
+    private static final int MAX_GAMBLE_STRAINS = 3;
 
     private final LockView view;
     private final CursorKeys keys;
@@ -132,11 +163,69 @@ public final class LockSession {
     private List<Move> plan;
     /** The configuration {@code plan}'s head applies to. Anything else and the plan is stale. */
     private int[] planFrom;
+    /**
+     * Strains that could not physically have happened - the read showed nothing at either end, yet the
+     * slide was rejected. Each one is a misread offset; a run of them means the reader has lost this
+     * (dark) frame. See {@link #step} and {@link #MAX_MISREAD_STRAINS}.
+     */
+    private int misreadStrains;
+    /** Strains spent while escalating, a whole-run budget capped at {@link #MAX_GAMBLE_STRAINS}. */
+    private int gambleStrains;
+    /**
+     * True while working through a reposition-then-gamble escalation ({@link #escalate}), so the gamble
+     * it sets up has its strain charged to {@link #gambleStrains}. Cleared the moment normal discovery
+     * resumes - a free or planned move, or a plate newly probed.
+     */
+    private boolean inEscalation;
+    /** Row corrections seen ({@link #learn} folding a different row over a wrong one); a progress signal. */
+    private int corrections;
+    /**
+     * Configurations visited since the last new fact, to catch any move loop that makes no progress.
+     * Cleared whenever the run learns something ({@link #knowledgeSignature} changes); a repeat within
+     * one such streak is a livelock, and the run stops instead of spinning until the game loses focus.
+     */
+    private final Set<Long> loopGuard = new HashSet<>();
+    private long lastKnowledge;
+    /**
+     * A verbose, machine-and-human-readable trace of every move, kept out of the console and written
+     * only to the per-F8 log file a bug report should carry - null when nobody is listening (every
+     * test). It is where the sequence of decisions that led to a wrong solve or a give-up actually
+     * lives; the console keeps just the headline lines.
+     */
+    private PrintStream trace;
+    /** Move counter and the tier that chose each move, for the {@link #trace}. */
+    private int stepNo;
+    private String tier = "";
 
     public LockSession(LockView view, CursorKeys keys, MoveExecutor mover) {
         this.view = view;
         this.keys = keys;
         this.mover = mover;
+    }
+
+    /** Sends the verbose move-by-move trace to {@code trace} (the per-F8 log file). Off by default. */
+    public void traceTo(PrintStream trace) {
+        this.trace = trace;
+    }
+
+    private void trace(String line) {
+        if (trace != null) {
+            trace.println(line);
+        }
+    }
+
+    /** The model as it now stands, for the trace: what each plate drags, and the run's counters. */
+    private void traceModel() {
+        if (trace == null) {
+            return;
+        }
+        trace("model, as learned:");
+        for (int p = 0; p < n; p++) {
+            trace("  plate " + p + " -> " + (conn[p] == null ? "UNPROBED" : describe(conn[p])));
+        }
+        trace(String.format(Locale.ROOT,
+                "state %s | strains %d (misread %d, gamble %d) | breaks %d | moves %d",
+                Arrays.toString(cur), strains, misreadStrains, gambleStrains, observedBreaks, moves));
     }
 
     /**
@@ -173,6 +262,14 @@ public final class LockSession {
         strainsOnThisPick = 0;
         strainsPerPick = 0;
         breakResetThePuzzle = false;
+        misreadStrains = 0;
+        gambleStrains = 0;
+        inEscalation = false;
+        corrections = 0;
+        loopGuard.clear();
+        lastKnowledge = Long.MIN_VALUE;
+        stepNo = 0;
+        tier = "";
         // The game parks the selection on the lowest plate when a lock opens - and again whenever a
         // pick breaks. Saturating S costs n presses of ~10ms and removes the assumption entirely.
         keys.endCursor(n);
@@ -189,6 +286,7 @@ public final class LockSession {
         }
         System.out.println("Detected " + n + " plates at " + Arrays.toString(cur)
                 + ". Learning the connections, then solving.");
+        trace("detected " + n + " plates at " + Arrays.toString(cur));
 
         try {
             loop();
@@ -198,6 +296,8 @@ public final class LockSession {
             } else {
                 unreadable("mid-run");
             }
+        } finally {
+            traceModel(); // whatever the outcome, the log ends with the model it learned
         }
     }
 
@@ -206,6 +306,7 @@ public final class LockSession {
             if (!recoverFull()) {
                 System.out.println("Stuck: a plate's hole row stays hidden after every nudge. "
                         + "Slide any plate one step by hand and press F8 again.");
+                view.dumpFrame("hidden-row");
                 return;
             }
             if (LockSolver.isGoal(cur)) {
@@ -225,6 +326,26 @@ public final class LockSession {
                 System.out.println("Giving up after " + strains + " strain(s), about " + picksSpent()
                         + " broken pick(s). Plates " + unprobed() + " never moved. Every lock in the "
                         + "game opens well inside this, so the fault is here, not in the lock.");
+                view.dumpFrame("picks-spent");
+                return;
+            }
+            if (misreadStrains >= MAX_MISREAD_STRAINS) {
+                // A slide can only strain by dragging a plate off an end. Enough strains the read
+                // called impossible means the reader has lost this frame, not that the lock is hard -
+                // so stop before it spends picks, and save the frame that beat it.
+                System.out.println("Stopping: " + misreadStrains + " slides I read as safe still "
+                        + "strained, which can only be a misread offset. This frame is unusually dark; "
+                        + "the reader has lost it, so going on would only cost picks. Saved the frame.");
+                view.dumpFrame("misread");
+                System.out.println("Please report the saved .png and the .txt beside it.");
+                return;
+            }
+            if (loopingWithoutProgress()) {
+                System.out.println("Stopping: I keep returning to the same configuration without "
+                        + "learning anything new" + (misreadStrains > 0
+                            ? " - most likely a misread on this unusually dark frame." : ".")
+                        + " Saved the frame instead of looping.");
+                view.dumpFrame(misreadStrains > 0 ? "misread" : "no-progress");
                 return;
             }
             Move action = nextAction();
@@ -243,12 +364,61 @@ public final class LockSession {
                     System.out.println("Please report the saved .png and the .txt beside it.");
                     return;
                 }
+                if (allProbed()) {
+                    // Every connection is known, yet the solver found no way to open it. A real lock is
+                    // always openable and every move is reversible, so a fully-learned model that will
+                    // not solve is a mislearned connection - a misread while probing, almost always on a
+                    // dark frame. (solvingMove has already printed which configuration it gave up on.)
+                    System.out.println("The connections I learned do not add up to a lock that opens, "
+                            + "but the game only ever gives you locks that do - so I misread a plate "
+                            + "while learning it. This frame is dark. Saved it.");
+                    view.dumpFrame("unsolvable-model");
+                    System.out.println("Please report the saved .png and the .txt beside it.");
+                    return;
+                }
                 System.out.println("Stuck: no move is left to try. Plates " + unprobed()
-                        + " will not budge in either direction, and no probed plate can free them.");
+                        + " will not budge in either direction, and no probed plate can free them."
+                        + (misreadStrains > 0 ? " (" + misreadStrains + " slide(s) I read as safe still "
+                            + "strained on the way - this frame is dark and I may be misreading it.)"
+                            : ""));
+                view.dumpFrame(misreadStrains > 0 ? "misread" : "stuck");
                 return;
             }
             step(action);
         }
+    }
+
+    /**
+     * The livelock guard. Every fact the run learns ({@link #knowledgeSignature} changing) empties the
+     * set of configurations seen since; a configuration that comes back <b>without a new fact between</b>
+     * is a loop that will never make progress - the endless "moving the same plate left and right by
+     * one" a reporter watched until he alt-tabbed. Solving never trips it (a shortest path visits no
+     * configuration twice), and every strain, break or probe resets it, so only a genuine no-progress
+     * cycle is caught.
+     */
+    private boolean loopingWithoutProgress() {
+        long knowledge = knowledgeSignature();
+        if (knowledge != lastKnowledge) {
+            loopGuard.clear();
+            lastKnowledge = knowledge;
+        }
+        return !loopGuard.add(LockSolver.encode(model(), cur));
+    }
+
+    /**
+     * A number that changes whenever the run has learned something and so made real progress: a strain,
+     * a break, a row corrected, a plate probed, or a move newly ruled out as hiding a row. Undoing a
+     * hidden probe lands back on the configuration it started from, which looks like a loop but is not -
+     * an occlusion was recorded, and next time a different move is tried. Counting {@code occluded} keeps
+     * that honest progress from tripping {@link #loopingWithoutProgress}.
+     */
+    private long knowledgeSignature() {
+        long probed = 0;
+        for (int p = 0; p < n; p++) {
+            if (conn[p] != null) probed |= 1L << p;
+        }
+        return (((long) strains) << 44) ^ (((long) observedBreaks) << 34)
+                ^ (((long) occluded.size()) << 24) ^ (((long) corrections) << 16) ^ (probed << 8);
     }
 
     /** Plays one move and folds what happened back into what we know. */
@@ -257,6 +427,9 @@ public final class LockSession {
         int dir = move.dir();
         int[] before = cur;
         MoveExecutor.Observation obs = mover.play(n, before, move);
+        trace(String.format(Locale.ROOT, "step %d [%s] plate %d %s: %s -> %s (%s%s)",
+                ++stepNo, tier, p, dir > 0 ? "left" : "right", Arrays.toString(before),
+                Arrays.toString(obs.state()), obs.outcome(), obs.pickBroke() ? ", pick broke" : ""));
 
         if (obs.outcome() == MoveExecutor.Outcome.MOVED && !obs.pickBroke()) {
             moves++;
@@ -273,7 +446,26 @@ public final class LockSession {
 
         // Everything else is a strain: the lock did not do what we asked.
         plan = null; // the lock is not where the plan thought; plan again from what is really there
-        refuse(before, p, dir);
+        int plusEnds = ends(before, +1, p);
+        int minusEnds = ends(before, -1, p);
+        // A slide can only strain by dragging some OTHER plate off an end. So a strain with nothing at
+        // either end is physically impossible on a lock we read correctly - the geometry that made this
+        // move look safe was itself a misread. Recording it as a refusal would be worse than useless:
+        // an empty culprit set never expires ({@link #isRefused}), permanently wedging the plate, which
+        // - together with an unblock plan that keeps "freeing" an already-free plate - is the endless
+        // left-right loop. So a contradictory strain is booked as a misread, never a refusal.
+        boolean contradictory = plusEnds == 0 && minusEnds == 0;
+        strained();
+        if (inEscalation) {
+            gambleStrains++; // a gamble a reposition set up, and the whole point of the sub-budget
+        }
+        if (contradictory) {
+            if (!obs.pickBroke()) {
+                misreadStrains++;
+            }
+        } else {
+            refused.add(new Refusal(p, dir, plusEnds, minusEnds));
+        }
         cur = obs.state();
         // The game may have moved the selection - it re-homes it whenever a pick breaks, and a break
         // is invisible above skill level 0. Saturating S is right either way, at ~10ms a press.
@@ -294,6 +486,14 @@ public final class LockSession {
             System.out.println("  plate " + p + " refused a move its connections say is legal;"
                     + " discarding what we knew about it.");
             conn[p] = null;
+            corrections++;
+        } else if (contradictory) {
+            // Nothing was at an end, so don't retry this exact slide from this exact configuration;
+            // once some plate moves, the misread may resolve and it becomes worth another look.
+            occluded.add(new Occlusion(p, dir, LockSolver.encode(model(), before)));
+            System.out.println("  plate " + p + " would not slide " + name(dir) + " though nothing sits "
+                    + "at an end - I am misreading a plate on this dark frame (" + misreadStrains
+                    + " so far).");
         } else {
             System.out.println("  plate " + p + " will not slide " + name(dir) + " yet: it must drag a "
                     + "plate already at the end of its track (strain " + strains + ").");
@@ -314,9 +514,11 @@ public final class LockSession {
         Connection[] learned = row.toArray(new Connection[0]);
         if (!first && !Arrays.equals(conn[p], learned)) {
             plan = null; // the model the plan was built on was wrong about this plate
+            corrections++; // a fact changed - progress, for the loop guard
         }
         conn[p] = learned;
         if (first) {
+            inEscalation = false; // a plate newly probed is real progress; leave the escalation regime
             System.out.println("  plate " + p + " drags " + describe(conn[p])
                     + (allProbed() ? "  -- every connection known, solving" : ""));
         }
@@ -412,15 +614,40 @@ public final class LockSession {
     /** The next move to play: a discovery move while anything is unprobed, otherwise a solving move. */
     private Move nextAction() {
         if (allProbed()) {
+            inEscalation = false;
+            tier = "solving";
             return solvingMove();
         }
         Move free = freeMove();
-        if (free != null) return free;
-
+        if (free != null) {
+            inEscalation = false;
+            tier = "free";
+            return free;
+        }
         Move planned = plannedMove();
-        if (planned != null) return planned;
-
-        return gamble();
+        if (planned != null) {
+            inEscalation = false;
+            tier = "planned";
+            return planned;
+        }
+        Move gamble = gamble();
+        // A non-null gamble may be the very one a reposition just set up, so its strain must still be
+        // charged to the escalation budget - leave inEscalation as it stands.
+        if (gamble != null) {
+            tier = inEscalation ? "reposition-gamble" : "gamble";
+            return gamble;
+        }
+        // Last resort, and the reason "stuck" is now rarer: shuffle plates we already understand until
+        // an unprobed one can be gambled in a direction we have not already ruled out, then let the
+        // gamble fire. It is the only thing that opens a lock where probing one plate strands another
+        // at an end. Capped by MAX_GAMBLE_STRAINS so a hard lock can never eat the inventory.
+        if (gambleStrains >= MAX_GAMBLE_STRAINS) {
+            inEscalation = false;
+            return null;
+        }
+        Move setup = escalate();
+        inEscalation = setup != null;
+        return setup;
     }
 
     /**
@@ -446,6 +673,7 @@ public final class LockSession {
         }
         plan = new ArrayList<>(moves);
         planFrom = cur.clone();
+        trace("solve from " + Arrays.toString(cur) + ": " + moves.size() + " moves " + planMoves(moves));
         return plan.get(0);
     }
 
@@ -509,21 +737,31 @@ public final class LockSession {
         return null;
     }
 
-    /** Toward centre if that is still worth trying, else away from it, else 0. */
+    /** Toward centre if that is still worth trying, else away from it, else 0, from {@code cur}. */
     private int pickDirection(int p) {
-        int toward = cur[p] > 0 ? -1 : +1;
+        return pickDirectionAt(cur, p);
+    }
+
+    /**
+     * A direction plate {@code p} is worth trying from {@code state} - toward centre first, then away -
+     * skipping any that would slide {@code p} off its track, is already known to strain, or is known to
+     * hide a row from here; 0 if none is left. State-parameterized so the reposition search can ask it
+     * of a configuration the lock is not in yet.
+     */
+    private int pickDirectionAt(int[] state, int p) {
+        int toward = state[p] > 0 ? -1 : +1;
         for (int dir : new int[] {toward, -toward}) {
-            if (Math.abs(cur[p] + dir) > LockModel.MAX_OFFSET) continue; // p itself would fall off
-            if (isRefused(cur, p, dir)) continue;
-            if (isOccludedHere(p, dir)) continue;
+            if (Math.abs(state[p] + dir) > LockModel.MAX_OFFSET) continue; // p itself would fall off
+            if (isRefused(state, p, dir)) continue;
+            if (isOccludedAt(state, p, dir)) continue;
             return dir;
         }
         return 0;
     }
 
     /** True if this exact move, from this exact configuration, is known to hide a row. */
-    private boolean isOccludedHere(int p, int dir) {
-        long key = LockSolver.encode(model(), cur);
+    private boolean isOccludedAt(int[] state, int p, int dir) {
+        long key = LockSolver.encode(model(), state);
         for (Occlusion o : occluded) {
             if (o.plate() == p && o.dir() == dir && o.configKey() == key) return true;
         }
@@ -536,6 +774,11 @@ public final class LockSession {
      * {@code target} guaranteed to slide. Returns null if no such state is reachable.
      */
     private List<Move> planUnblock(int target) {
+        // The ends are already clear for the target: there is nothing to plan. Left unguarded, the BFS
+        // below still returns a one-move detour to a neighbouring also-clear state, and if the target
+        // is nonetheless unplayable (both directions refused), plannedMove keeps ordering that detour
+        // forever - the endless one-step oscillation a reporter had to alt-tab out of.
+        if (othersAtEnds(cur, target) == 0) return null;
         LockModel m = model();
         List<Integer> movers = new ArrayList<>();
         for (int q = 0; q < n; q++) {
@@ -579,6 +822,73 @@ public final class LockSession {
         return moves;
     }
 
+    /**
+     * The first move of a reposition that ends where an unprobed plate can finally be gambled - the
+     * last-resort step {@link #nextAction} takes when nothing safe is left. Its point is the case that
+     * used to report "stuck: no move left to try" on a solvable lock: probing one interior plate drags
+     * another to an end, where its only informative direction becomes off-track, and discovery
+     * dead-ends. Walking the plates we already understand back frees the stranded one, and then the
+     * ordinary gamble reveals its row and breaks the deadlock. A successful gamble costs no strain; a
+     * failed one is charged to {@link #MAX_GAMBLE_STRAINS}.
+     */
+    private Move escalate() {
+        List<Move> setup = repositionForFreshGamble();
+        if (setup == null || setup.isEmpty()) {
+            return null;
+        }
+        System.out.println("  no safe probe left; repositioning plates we understand to free one to "
+                + "gamble (" + setup.size() + " move(s)).");
+        return setup.get(0);
+    }
+
+    /**
+     * Breadth-first search, over moves of already-probed plates only (each proven legal by
+     * {@link LockSolver#applyMove}), for the shortest way to a configuration in which some still-unprobed
+     * plate can be gambled in a direction not already ruled out ({@link #hasFreshGamble}). Returns null
+     * when no such configuration is reachable - which is exactly a genuinely deadlocked lock, so the
+     * caller then stops instead of retrying, and the two-strain budget of a real deadlock is preserved.
+     */
+    private List<Move> repositionForFreshGamble() {
+        LockModel m = model();
+        List<Integer> movers = new ArrayList<>();
+        for (int q = 0; q < n; q++) {
+            if (conn[q] != null) movers.add(q);
+        }
+        if (movers.isEmpty()) return null;
+
+        Map<Long, long[]> cameFrom = new HashMap<>();
+        Map<Long, int[]> seen = new HashMap<>();
+        Deque<int[]> queue = new ArrayDeque<>();
+        long startKey = LockSolver.encode(m, cur);
+        seen.put(startKey, cur);
+        queue.add(cur);
+
+        while (!queue.isEmpty() && seen.size() < MAX_SEARCH_STATES) {
+            int[] state = queue.poll();
+            long key = LockSolver.encode(m, state);
+            for (int q : movers) {
+                for (int dir = -1; dir <= 1; dir += 2) {
+                    int[] next = LockSolver.applyMove(m, state, q, dir);
+                    if (next == null) continue; // would strain
+                    long nextKey = LockSolver.encode(m, next);
+                    if (seen.putIfAbsent(nextKey, next) != null) continue;
+                    cameFrom.put(nextKey, new long[] {key, q, dir});
+                    if (hasFreshGamble(next)) return path(cameFrom, startKey, nextKey);
+                    queue.add(next);
+                }
+            }
+        }
+        return null;
+    }
+
+    /** True if some unprobed plate can be gambled from {@code state} in a not-yet-ruled-out direction. */
+    private boolean hasFreshGamble(int[] state) {
+        for (int q = 0; q < n; q++) {
+            if (conn[q] == null && pickDirectionAt(state, q) != 0) return true;
+        }
+        return false;
+    }
+
     // --- the geometry of a block ---
 
     /**
@@ -616,11 +926,6 @@ public final class LockSession {
             if ((r.plusEnds() & ~plus) == 0 && (r.minusEnds() & ~minus) == 0) return true;
         }
         return false;
-    }
-
-    private void refuse(int[] state, int p, int dir) {
-        refused.add(new Refusal(p, dir, ends(state, +1, p), ends(state, -1, p)));
-        strained();
     }
 
     /**
@@ -734,6 +1039,16 @@ public final class LockSession {
 
     private static String name(int dir) {
         return dir > 0 ? "left" : "right";
+    }
+
+    /** A plan as a compact list of {@code <plate><L|R>} moves, for the trace. */
+    private static String planMoves(List<Move> moves) {
+        StringBuilder sb = new StringBuilder("[");
+        for (int i = 0; i < moves.size(); i++) {
+            Move m = moves.get(i);
+            sb.append(i > 0 ? " " : "").append(m.plate()).append(m.dir() > 0 ? "L" : "R");
+        }
+        return sb.append(']').toString();
     }
 
     private static String describe(Connection[] row) {

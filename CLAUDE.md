@@ -96,7 +96,7 @@ goes in one of the first three.
   change, 407/407 still green. (JUnit 6's breaking changes — Java 17 baseline, the removed
   `migrationsupport` module, FastCSV replacing univocity — touch nothing here.)
 - **`gradlew build` also enforces coverage** (`jacocoTestCoverageVerification`, wired into `check`):
-  **≥92% line, ≥90% branch**, currently at 94.3/91.8. `win32` is excluded from the report *and* the
+  **≥94% line, ≥90% branch**, currently at 94.5/90.6. `win32` is excluded from the report *and* the
   gate — it is the FFM boundary, and a test of it would test Windows. What is left uncovered is only
   what a headless JVM cannot reach: `AutoLockpick.main` (owns a `Robot`, a `Toolkit` and an endless
   loop) plus its display-owning helpers (`awtScale`, `screenSize`, `environment` — a headless JVM
@@ -352,7 +352,19 @@ connections and the game's real strain/break/reset rules.
   locks); nothing is kept between presses but the keyboard. `main` is only the composition root: the
   hotkey edge (`Hotkey`), the focus gate (`run`), the process resolution (`resolveGameProcess`), the
   viewport (`resolveViewport`), the DPI self-check (`dpiWarning`), the offline replay (`diagnose`,
-  `--diagnose <png>`) and the banner are package-private and tested.
+  `--diagnose <png>`), the banner, and the run-log header (`solveHeader`) are package-private and
+  tested. The build number reaches the running app through the jar manifest (`Implementation-Version`,
+  read back by `version()`; `"dev"` from a manifest-less classpath), because the first thing every bug
+  report needs is which build it is.
+
+- **`RunLog`** (root) — every F8 solve is also saved whole to `captures/f8-<time>.log`, so a report is
+  one file to attach rather than a console pasted before its useful lines scroll off (the failures in
+  the reporter's screenshots saved nothing). It **tees** `System.out` to console *and* file for the
+  run (the one line that must live in `main`), keeps a **file-only** `detail()` channel for the
+  verbose half — the full environment, `reader.describe()`, and `LockSession`'s move-by-move
+  `traceTo` trace (tier + before→after + outcome per step, the plan, the learned model) — and deletes
+  itself if the press was never focused. The console keeps the headline; the file has everything. All
+  of it is a diagnostic, so a file that will not open costs a line, never the run.
 
 ### Testing seams (four, all package-private — use them, don't add a fifth)
 
@@ -436,10 +448,32 @@ off the ends, and escalates cheapest-risk-first:
 2. **Planned** — BFS for a sequence of moves of *already-probed* plates that clears the ends for it.
    Their connections are known, so `LockSolver.applyMove` proves each move legal before a key is
    pressed. **Costs time, never a pick** — which is the trade the whole routine exists to make.
-3. **Gamble** — only when neither of the above exists. A strained move is remembered and not retried
+3. **Gamble** — when none of the above exists. A strained move is remembered and not retried
    *while every plate that was at an end back then is still at that end* — the culprit is among them,
    so the retry would fail (`isRefused`). **That memory survives a broken pick**, which is what stops
    the reset from recreating the very gamble that just failed.
+4. **Reposition then gamble** (`escalate`/`repositionForFreshGamble`) — the last resort, and what
+   keeps a *solvable* lock from reporting "stuck: no move left to try". Probing one interior plate can
+   drag another to an end, where its only informative direction goes off-track and discovery
+   dead-ends — a real live failure (a 5-plate door at `[2,-3,-3,2,-3]`). So BFS the moves of
+   *already-probed* plates for a configuration in which an unprobed plate can be gambled in a
+   not-yet-refused direction, go there, and gamble. It respects refusals, so a genuinely deadlocked
+   lock still finds nothing and stops at its two-strain budget. Capped by `MAX_GAMBLE_STRAINS` so a
+   hard lock can never eat the inventory.
+
+**A strain the read says is impossible is a misread, not a refusal** (`step`). A slide can only strain
+by dragging a plate off an end, so a strain with *nothing at either end* contradicts the geometry that
+made the move look safe. Recording it as a refusal wedges the run: an empty culprit set never expires
+(`isRefused`), and combined with an unblock planner that kept "freeing" an already-free plate (fixed by
+a start-state guard in `planUnblock`) it was **the endless one-step oscillation a reporter had to
+alt-tab out of** — "moving the same plate left and right by 1 pin". So a contradictory strain is
+*counted* (`misreadStrains`), never refused; enough of them stops the run with the frame saved as a
+misread. A whole-run `loopingWithoutProgress` guard catches any residual no-progress cycle, and
+**every give-up now saves a frame** (`stuck` / `misread` / `unsolvable-model` / `no-progress` /
+`picks-spent`), so the next report arrives with the evidence in it — the failures in these screenshots
+did not. A *fully-probed* model the solver cannot open is likewise a misread, not a hard lock: a real
+lock is always openable and every move reversible, so `allProbed` + no solution ⇒ a mislearned
+connection, dumped as `unsolvable-model`.
 
 **Unreadable rows are tolerated, never learned from.** A settled observation can contain
 `UNKNOWN` entries — the reader refuses to guess rather than misread. (The one cause ever
@@ -514,8 +548,8 @@ additionally reads HDR dumps `LockReader` returns −1 on; `LatticeReaderTest` a
 whole-corpus safety invariants (never a wrong plate count, never a false pop, offsets in range).
 `CaptureBoxTest` proves the capture box contains everything the reader samples — any plate count, any
 offsets, any viewport — with a safety belt. The full suite is **~1750 tests** across
-solver/vision/control/session and the root, and **every class outside `win32` is covered** (94.9%
-line / 91.2% branch, gated at 94/90 — see "Testing seams" below).
+solver/vision/control/session and the root, and **every class outside `win32` is covered** (94.5%
+line / 90.6% branch, gated at 94/90 — see "Testing seams" below).
 
 **The gamma slider is covered end to end** (`gamma/`, 27 frames, `src/test/data/frames/gamma/labels.txt`).
 The same 7-plate chest, the same key protocol, replayed at every setting from 1.2 to 3.2 — plus the

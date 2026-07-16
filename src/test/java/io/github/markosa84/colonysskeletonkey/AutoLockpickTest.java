@@ -342,6 +342,118 @@ class AutoLockpickTest {
         assertTrue(banner.contains("other.exe"),
                 "the banner must name the process the gate waits for: " + banner);
         assertTrue(banner.contains("F8"), banner);
+        assertTrue(banner.contains(AutoLockpick.version()), "the build belongs in every report: " + banner);
+    }
+
+    // -- the run log header ------------------------------------------------------------------------
+
+    /** Run from classes with no jar manifest, the version is "dev" rather than null or a crash. */
+    @Test
+    void theVersionIsDevWhenThereIsNoManifestToReadItFrom() {
+        assertEquals("dev", AutoLockpick.version());
+    }
+
+    /**
+     * The head of every run log: the console gets the build and the reader (so a pasted snippet is
+     * still identifiable), and the file gets the full environment, the viewport scale and the reader's
+     * account of the frame - the diagnostics that used to appear only when a failure dumped a frame.
+     */
+    @Test
+    void theHeaderPutsTheBuildOnTheConsoleAndTheDiagnosticsInTheFile() throws Exception {
+        java.io.ByteArrayOutputStream detailBytes = new java.io.ByteArrayOutputStream();
+        java.io.PrintStream detail = new java.io.PrintStream(detailBytes, true, "UTF-8");
+
+        String console = Stdout.capturing(() -> AutoLockpick.solveHeader("1.2.3", "lattice",
+                Viewport.REFERENCE, Tone.CALIBRATED, "display: 3840x2160\n", "found 5 warm blobs",
+                detail));
+
+        assertTrue(console.contains("1.2.3") && console.contains("lattice"), console);
+        assertFalse(console.contains("found 5 warm blobs"), "the blob account is file-only: " + console);
+        String file = detailBytes.toString("UTF-8");
+        assertTrue(file.contains("display: 3840x2160"), file);
+        assertTrue(file.contains("scale"), "the viewport scale is a bug report's first suspect: " + file);
+        assertTrue(file.contains("found 5 warm blobs"), file);
+    }
+
+    /** With no file to write to (the fallback), the header is the console lines and nothing throws. */
+    @Test
+    void theHeaderWithoutAFileIsJustTheConsoleLines() {
+        String console = Stdout.capturing(() -> AutoLockpick.solveHeader("dev", "legacy",
+                Viewport.REFERENCE, Tone.CALIBRATED, "unused", "unused", null));
+
+        assertTrue(console.contains("dev") && console.contains("legacy"), console);
+    }
+
+    /** The reader's account goes into the report; a reader that throws costs a line, not the run. */
+    @Test
+    void describeNeverThrowsIntoTheReport() {
+        java.awt.image.BufferedImage frame =
+                new java.awt.image.BufferedImage(1, 1, java.awt.image.BufferedImage.TYPE_INT_RGB);
+
+        assertEquals("all good", AutoLockpick.describeOrWhyNot(new StubAnalyzer("all good"), frame));
+        assertTrue(AutoLockpick.describeOrWhyNot(new StubAnalyzer(null), frame)
+                .startsWith("reader.describe failed:"), "a throwing reader is caught, not propagated");
+    }
+
+    /** A focused, logged run keeps its file and says where it went, so the reporter can attach it. */
+    @Test
+    void aLoggedRunOverTheGameKeepsItsFileAndSaysWhere(@TempDir Path dir) throws Exception {
+        Path logFile = dir.resolve("captures").resolve("f8.log");
+        java.io.ByteArrayOutputStream consoleBytes = new java.io.ByteArrayOutputStream();
+        java.io.PrintStream console = new java.io.PrintStream(consoleBytes, true, "UTF-8");
+        RunLog log = RunLog.open(logFile, console);
+
+        AutoLockpick.solveLogged(log, console, new Telemetry(), () -> GAME, GAME,
+                () -> System.out.println("the session ran"));
+
+        assertTrue(java.nio.file.Files.readString(logFile).contains("the session ran"),
+                "the file must carry what the run printed");
+        assertTrue(consoleBytes.toString("UTF-8").contains("full log saved to"),
+                consoleBytes.toString("UTF-8"));
+    }
+
+    /** An F8 over another window logs nothing: the file is deleted and no path is announced. */
+    @Test
+    void aLoggedRunOverAnotherWindowLeavesNoFile(@TempDir Path dir) throws Exception {
+        Path logFile = dir.resolve("f8.log");
+        java.io.ByteArrayOutputStream consoleBytes = new java.io.ByteArrayOutputStream();
+        java.io.PrintStream console = new java.io.PrintStream(consoleBytes, true, "UTF-8");
+        RunLog log = RunLog.open(logFile, console);
+
+        AutoLockpick.solveLogged(log, console, new Telemetry(), () -> "chrome.exe", GAME,
+                () -> fail("the session must not run when the game is not focused"));
+
+        assertFalse(java.nio.file.Files.exists(logFile), "an ignored press leaves no log");
+        assertFalse(consoleBytes.toString("UTF-8").contains("full log saved"),
+                consoleBytes.toString("UTF-8"));
+        assertTrue(consoleBytes.toString("UTF-8").contains("Ignored"), consoleBytes.toString("UTF-8"));
+    }
+
+    /** A reader that only answers {@code describe}, with the text it was given (null = throw). */
+    private record StubAnalyzer(String describe) implements io.github.markosa84.colonysskeletonkey
+            .vision.LockAnalyzer {
+        @Override
+        public int detectPlateCount(java.awt.image.BufferedImage img) {
+            return -1;
+        }
+
+        @Override
+        public boolean[] readCentered(java.awt.image.BufferedImage img, int n) {
+            return new boolean[n];
+        }
+
+        @Override
+        public int[] readState(java.awt.image.BufferedImage img, int n) {
+            return new int[n];
+        }
+
+        @Override
+        public String describe(java.awt.image.BufferedImage img) {
+            if (describe == null) {
+                throw new IllegalStateException("boom");
+            }
+            return describe;
+        }
     }
 
     // -- replaying a reported frame ----------------------------------------------------------------
