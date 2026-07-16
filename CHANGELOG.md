@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.3.0](https://github.com/markosa84/colonys-skeleton-key/compare/v1.2.0...v1.3.0) (2026-07-16)
+
+
+### Features
+
+* save a full per-F8 run log, and stamp the build for bug reports ([0766999](https://github.com/markosa84/colonys-skeleton-key/commit/0766999a207e00595485c0875fd6d463a0ff4096))
+
+
+### Bug Fixes
+
+* **session:** open the hard locks that used to loop forever or give up ([bf83a07](https://github.com/markosa84/colonys-skeleton-key/commit/bf83a0745b2d5046d4ef0d5760a5cfb76fa55669))
+
 ## [1.2.0](https://github.com/markosa84/colonys-skeleton-key/compare/v1.1.0...v1.2.0) (2026-07-15)
 
 
