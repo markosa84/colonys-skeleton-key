@@ -46,9 +46,14 @@ tasks.named<JavaExec>("run") {
 }
 
 // The version belongs on the release zip, not on the jar inside it: lockpick.bat and jpackage both
-// name the jar, and neither wants to track a version to find it.
+// name the jar, and neither wants to track a version to find it. It does belong in the manifest,
+// though - that is the only way the running app can say which build it is, which every bug report
+// needs (AutoLockpick.version reads it back).
 tasks.jar {
     archiveVersion = ""
+    manifest {
+        attributes("Implementation-Version" to project.version)
+    }
 }
 
 /**

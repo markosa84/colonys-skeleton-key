@@ -60,6 +60,13 @@ without the game running:
 ColonysSkeletonKey.exe --diagnose captures\no-lock-20260713-103856-180.png
 ```
 
+## If it gets stuck, loops, or opens the wrong thing
+
+Every F8 writes a complete log of that attempt to `captures\f8-<time>.log` — the whole environment,
+what the reader saw, and a move-by-move trace of what it did and why. If a lock does not open, or the
+tool does something odd, **[open an issue](../../issues) and attach that file** (plus any `.png`/`.txt`
+that appear beside it). It is far more use than a screenshot: it says exactly where the run went wrong.
+
 ## What it does, plainly
 
 It takes screenshots of your screen and it presses keys. That is all it does.
