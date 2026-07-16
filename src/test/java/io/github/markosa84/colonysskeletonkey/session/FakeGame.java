@@ -48,6 +48,14 @@ final class FakeGame implements LockView, MoveExecutor, CursorKeys {
     int hiddenPlate = -1;
     java.util.function.Predicate<int[]> hideWhen = s -> false;
 
+    /**
+     * A stable offset misread: what the reader sees instead of the truth. The move still lands on the
+     * <b>truth</b> - the game does not care that we mis-saw it - so a slide the misread makes look safe
+     * can still strain, which is exactly the live failure that wedged the session on a dark frame. The
+     * pins ({@link #readCentered}) are never misread: they are the game's own exact signal.
+     */
+    java.util.function.UnaryOperator<int[]> misread = java.util.function.UnaryOperator.identity();
+
     FakeGame(LockModel truth, Skill skill) {
         this.truth = truth;
         this.skill = skill;
@@ -117,9 +125,9 @@ final class FakeGame implements LockView, MoveExecutor, CursorKeys {
         return mask(state);
     }
 
-    /** What the screen shows: the truth, minus any plate whose row is currently hidden. */
+    /** What the screen shows: the truth as (mis)read, minus any plate whose row is currently hidden. */
     private int[] mask(int[] s) {
-        int[] out = s.clone();
+        int[] out = misread.apply(s.clone());
         if (hiddenPlate >= 0 && hideWhen.test(s)) {
             out[hiddenPlate] = LockModel.UNKNOWN;
         }
