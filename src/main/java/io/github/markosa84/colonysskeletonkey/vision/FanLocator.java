@@ -99,10 +99,31 @@ public final class FanLocator {
      */
     private static final int RIDGE_REACH = 4;
     /**
-     * Worked px of dropout a run may jump. The diamond ornament at the rule's centre breaks the
-     * ridge, and a run that stops there measures half a rule and a wrong scale by a factor of two.
+     * Worked px of dropout a run may jump.
+     *
+     * <p><b>Tight, and it has to be.</b> This number cannot be asked to bridge the diamond ornament
+     * at the rule's centre - that is what {@link #MERGE} is for - because the room is full of faint
+     * horizontal ridges and every px of slack here chains the rule into them. Measured on the
+     * corpus: at 8 the run runs 100px past each end of the rule and reads 912 reference px where the
+     * rule is 710, which is a 28% scale error and a pose that finds no lockpick counter at all. At 3
+     * it reads 699-712 on nine frames in twelve.
      */
-    private static final int RIDGE_GAP = 8;
+    private static final int RIDGE_GAP = 3;
+
+    /**
+     * How far apart two runs on one row may sit and still be one thing, as a fraction of the shorter
+     * of them.
+     *
+     * <p>The rule is drawn with a diamond ornament at its centre, and on a dark gamma - or at a
+     * small resolution - the ornament breaks the ridge in two. Each half then measures ~355
+     * reference px, which is half a rule, which is a scale wrong by a factor of two. Widening
+     * {@link #RIDGE_GAP} to bridge it lets the room in; this joins the halves without doing that,
+     * because the test is <b>relative</b>: two pieces are one thing when the gap between them is
+     * small compared to the pieces themselves. The rule's halves are ~118 worked px each with ~7
+     * between them, and join. A room's two beams are 100 apart with 300 between them, and do not.
+     * Nor does dense texture: three-pixel ridges two pixels apart are not each other's halves.
+     */
+    private static final double MERGE = 0.15;
 
     /** Scales worth believing: below this the lock is unreadable anyway, above it there is no display. */
     private static final double MIN_SCALE = 0.15, MAX_SCALE = 1.6;
@@ -126,7 +147,7 @@ public final class FanLocator {
      * whole search is narrower than that, so nothing in it can land on the wrong slot. The reader
      * cannot tell one slot from the next - but that is not what it is being asked.
      */
-    private static final int NUDGE = 12, NUDGE_STEP = 4;
+    private static final int NUDGE = 20, NUDGE_STEP = 4;
 
     /**
      * What the locator made of one frame: a pose, or the reason there is none - and an account
@@ -172,16 +193,32 @@ public final class FanLocator {
             if (Tone.estimate(frame, read).isGuess() || !onFrame(frame, read)) {
                 continue;
             }
+            // Every nudge that reads, and then the LARGEST lock among them - not the nearest.
+            //
+            // "A smaller fan is not a smaller lock" is this codebase's own hardest-won rule, and it
+            // applies here for the same reason it applies in the reader: the fans of n and n+2 share
+            // a lattice, so a pose that is a little out can read a real 5-plate lock as a consistent
+            // 4-plate one - walk and all, six holes a row, pop agreeing with the walk. Measured, that
+            // was the last 7 misreads, and every one of them was a 4 where the truth was 5. Taking
+            // the first pose that reads means taking whichever the search happened to reach first;
+            // taking the largest is the same choice detectPlateCount already makes when the lattices
+            // overlap, and it is right for the same reason.
+            ViewMapping best = null;
+            int most = 0;
             for (ViewMapping pose : nudges(read)) {
                 if (++tried > MAX_POSES) {
                     break;
                 }
-                if (reads(frame, pose)) {
-                    double moved = Math.hypot(pose.ox() - read.ox(), pose.oy() - read.oy())
-                            / pose.scale();
-                    return new Fit(pose, read.scale(), moved,
-                            found(plane, pose, rules.size(), moved));
+                int n = reads(frame, pose);
+                if (n > most) {
+                    most = n;
+                    best = pose;
                 }
+            }
+            if (best != null) {
+                double moved = Math.hypot(best.ox() - read.ox(), best.oy() - read.oy())
+                        / best.scale();
+                return new Fit(best, read.scale(), moved, found(plane, best, rules.size(), moved));
             }
         }
         return Fit.refused(account(plane, rules.size(), tried,
@@ -243,31 +280,52 @@ public final class FanLocator {
     List<double[]> rules(Plane p) {
         List<double[]> out = new ArrayList<>();
         for (int y = RIDGE_REACH; y < p.h - RIDGE_REACH; y++) {
-            int lo = -1, hi = -1, runLo = -1, runHi = -1, gap = 0;
-            for (int x = 0; x < p.w; x++) {
-                int v = p.lum[y * p.w + x];
-                if (v > p.lum[(y - RIDGE_REACH) * p.w + x] && v > p.lum[(y + RIDGE_REACH) * p.w + x]) {
-                    runLo = runLo < 0 ? x : runLo;
-                    runHi = x;
-                    gap = 0;
-                } else if (runLo >= 0 && ++gap > RIDGE_GAP) {
-                    if (runHi - runLo > hi - lo) {
-                        lo = runLo;
-                        hi = runHi;
-                    }
-                    runLo = -1;
-                }
-            }
-            if (runLo >= 0 && runHi - runLo > hi - lo) {
-                lo = runLo;
-                hi = runHi;
-            }
-            if (lo >= 0) {
-                out.add(new double[] {y, lo, hi});
+            List<double[]> runs = merge(runs(p, y));
+            for (double[] run : runs) {
+                out.add(new double[] {y, run[0], run[1]});
             }
         }
         out.sort(Comparator.comparingDouble(a -> a[1] - a[2])); // longest first
         return out.subList(0, Math.min(MAX_CANDIDATES, out.size()));
+    }
+
+    /** Every maximal ridge run on one row, as {@code {lo, hi}}, left to right. */
+    private static List<double[]> runs(Plane p, int y) {
+        List<double[]> runs = new ArrayList<>();
+        int lo = -1, hi = -1, gap = 0;
+        for (int x = 0; x < p.w; x++) {
+            int v = p.lum[y * p.w + x];
+            if (v > p.lum[(y - RIDGE_REACH) * p.w + x] && v > p.lum[(y + RIDGE_REACH) * p.w + x]) {
+                lo = lo < 0 ? x : lo;
+                hi = x;
+                gap = 0;
+            } else if (lo >= 0 && ++gap > RIDGE_GAP) {
+                runs.add(new double[] {lo, hi});
+                lo = -1;
+            }
+        }
+        if (lo >= 0) {
+            runs.add(new double[] {lo, hi});
+        }
+        return runs;
+    }
+
+    /** Joins the runs that are pieces of one thing. See {@link #MERGE}. */
+    private static List<double[]> merge(List<double[]> runs) {
+        List<double[]> out = new ArrayList<>();
+        for (double[] run : runs) {
+            if (!out.isEmpty()) {
+                double[] last = out.getLast();
+                double between = run[0] - last[1];
+                double shorter = Math.min(last[1] - last[0], run[1] - run[0]);
+                if (between <= MERGE * shorter) {
+                    last[1] = run[1];
+                    continue;
+                }
+            }
+            out.add(new double[] {run[0], run[1]});
+        }
+        return out;
     }
 
     /** The pose a rule candidate implies, or null when it implies no believable one. */
@@ -298,28 +356,64 @@ public final class FanLocator {
     // --- the two disposers -----------------------------------------------------------------------
 
     /**
-     * The lock must <b>read</b> at the pose, not merely be counted there: every row resolved, no
-     * {@link LockModel#UNKNOWN}. Counting is not enough - measured, {@code detectPlateCount} alone
-     * accepts a pose 34px out, because a row counts as a plate on a popped pin in lit steel whose
-     * holes never resolved.
+     * The lock must <b>be walked</b> at the pose: every row, all six holes, hole to hole.
+     *
+     * <p>The two weaker versions of this were both tried, and both were measured accepting poses
+     * that read the lock <i>wrongly</i> - which is the one outcome worse than not finding it, since
+     * the session would then drive a wrong model into the walls:
+     * <ul>
+     *   <li><b>{@code detectPlateCount ∈ 4..7}</b> alone accepts a pose 34px out. A row counts as a
+     *       plate on {@code (walked == 6 || popped) && lit >= LIT_PLATE}, so a popped pin in lit
+     *       steel carries a row whose holes never resolved.</li>
+     *   <li><b>and no {@link LockModel#UNKNOWN} in the state</b> is barely stronger, because
+     *       {@code RowFit.offset()} short-circuits a popped row to 0 <i>without walking it</i>. A
+     *       pose where every row happens to read "popped" therefore resolves every row and reports
+     *       a lock at {@code [0, 0, 0, 0, 0, 0]} - a solved lock, out of a wrong pose. Measured, 81
+     *       of 233 located poses did exactly this.</li>
+     * </ul>
+     *
+     * <p>So <b>both</b> of the reader's signals are asked, and they must agree on every row:
+     * <ul>
+     *   <li>the <b>walk</b> - all six holes, pin to hole to hole at a measured spacing - which a
+     *       pose off by a fraction of a slot cannot make add up;</li>
+     *   <li>and the <b>pop</b>, which must say "centred" for exactly the row the walk puts at slot
+     *       0, and for no other.</li>
+     * </ul>
+     *
+     * <p>That last clause is what closes the hole, and it is worth seeing why it is strong. The two
+     * signals are <b>physically different things</b>: the pop is the brass pin standing up out of
+     * the plate, and the walk is the row of holes cut in it. Nothing about a wrong pose makes them
+     * agree - it moves the pin column onto a hole and the plate reads popped when the walk says it
+     * sits at 3. Measured, that single disagreement was 59 of the misreads: poses that walked all
+     * six holes on every row and still reported {@code [3, 1, 0, 0, 3]} where the truth is
+     * {@code [3, 1, 2, 0, 3]}, because {@code RowFit.offset()} lets a pop overrule the walk. Only
+     * the true pose has the pin standing where the holes say the middle is.
+     *
+     * <p>It is a strict bar, and it should be: this is a pose the tool <i>invented</i>, on a frame
+     * it had already failed to read, and a wrong one costs the player lockpicks. A lock this refuses
+     * is left to the reader's own machinery, which is built to be generous; the locator's job is
+     * only to say where to look, and it should only say so when it is sure.
      *
      * <p>Always the {@link LatticeReader}, whatever {@code --reader} the run is using: this is a
      * question about <b>where the lock is</b>, and the tone-free reader is strictly the better
      * instrument for it - a frame whose colours the calibrated reader cannot handle is exactly the
      * kind of frame that got here.
      */
-    private static boolean reads(BufferedImage frame, ViewMapping pose) {
+    private static int reads(BufferedImage frame, ViewMapping pose) {
         LatticeReader reader = new LatticeReader(pose, Tone.estimate(frame, pose));
         int n = reader.detectPlateCount(frame);
         if (n < LockModel.MIN_PLATES || n > LockModel.MAX_PLATES) {
-            return false;
+            return 0;
         }
-        for (int offset : reader.readState(frame, n)) {
-            if (offset == LockModel.UNKNOWN) {
-                return false;
+        for (LatticeReader.RowFit row : reader.rows(frame, n)) {
+            if (row.walked() != FanGeometry.HOLES_PER_PLATE) {
+                return 0;
+            }
+            if (row.popped() != (row.slot() == LockModel.MAX_OFFSET)) {
+                return 0;
             }
         }
-        return true;
+        return n;
     }
 
     /** True when the pose puts enough of the fan on the frame to be a lock the player can see. */

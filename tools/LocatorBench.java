@@ -8,6 +8,8 @@ import java.util.Locale;
 import javax.imageio.ImageIO;
 
 import io.github.markosa84.colonysskeletonkey.vision.FanLocator;
+import io.github.markosa84.colonysskeletonkey.vision.LatticeReader;
+import io.github.markosa84.colonysskeletonkey.vision.Tone;
 import io.github.markosa84.colonysskeletonkey.vision.ViewMapping;
 import io.github.markosa84.colonysskeletonkey.vision.Viewport;
 
@@ -53,6 +55,8 @@ public final class LocatorBench {
         System.out.printf("TOTAL: located %d of %d, worst centre %.2f hole spacings, "
                         + "worst scale error %.2f%%, %.0f ms/frame%n",
                 all.found, all.total, all.worstCentreU, 100 * all.worstScale, all.meanMs());
+        System.out.printf("       MISREADS: %d - a located pose that reads the lock differently "
+                        + "from the true one. This is the number that must be zero.%n", all.wrong);
     }
 
     static Stats run(File dir, String label) throws Exception {
@@ -83,10 +87,22 @@ public final class LocatorBench {
             s.worstCentreU = Math.max(s.worstCentreU, err / spacing);
             s.worstScale = Math.max(s.worstScale,
                     Math.abs(fit.mapping().scale() - truth.scale()) / truth.scale());
+
+            // The only question that matters. A pose is not "found" because the reader read
+            // SOMETHING at it - a lattice is periodic, so a pose a slot out reads the lock and
+            // reports wrong offsets without complaint. So: read it at the located pose, read it at
+            // the pose the corpus says is true, and demand they agree. Anything else is a lie.
+            String here = read(img, fit.mapping());
+            String there = read(img, truth);
+            if (!here.equals(there)) {
+                s.wrong++;
+                System.out.printf(Locale.ROOT, "    !! %-38s located %s, truth %s%n",
+                        png.getParentFile().getName() + "/" + png.getName(), here, there);
+            }
         }
-        System.out.printf(Locale.ROOT, "%-34s %5d %6d %8.1f %9.3f %7.2f%% %7.0f%n",
+        System.out.printf(Locale.ROOT, "%-34s %5d %6d %8.1f %9.3f %7.2f%% %7.0f  %s%n",
                 label, s.found, s.total, s.worstCentre, s.worstCentreU, 100 * s.worstScale,
-                s.meanMs());
+                s.meanMs(), s.wrong == 0 ? "" : "MISREAD " + s.wrong);
         return s;
     }
 
@@ -95,14 +111,22 @@ public final class LocatorBench {
         return new double[] {m.x(3090.0), m.y(798.0)};
     }
 
+    /** What the reader makes of the frame at a pose: the plate count and every offset. */
+    static String read(BufferedImage img, ViewMapping pose) {
+        LatticeReader reader = new LatticeReader(pose, Tone.estimate(img, pose));
+        int n = reader.detectPlateCount(img);
+        return n < 4 ? "none" : n + Arrays.toString(reader.readState(img, n));
+    }
+
     static final class Stats {
-        int found, total;
+        int found, total, wrong;
         double worstCentre, worstCentreU, worstScale;
         final List<Double> ms = new ArrayList<>();
 
         void add(Stats o) {
             found += o.found;
             total += o.total;
+            wrong += o.wrong;
             worstCentre = Math.max(worstCentre, o.worstCentre);
             worstCentreU = Math.max(worstCentreU, o.worstCentreU);
             worstScale = Math.max(worstScale, o.worstScale);
