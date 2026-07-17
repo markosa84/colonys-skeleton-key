@@ -146,6 +146,13 @@ public final class FanLocator {
     /** How far two pin hypotheses may sit apart and count as the same one, in hole spacings. */
     private static final double SAME_PIN = 0.25;
 
+    /**
+     * How many times the scale and the pins are measured against each other. Two would do - the
+     * first pass is already within a few percent - and the third is there to show it has stopped
+     * moving rather than to move it.
+     */
+    private static final int REFINE_PASSES = 3;
+
     // --- acceptance ------------------------------------------------------------------------------
 
     private static final int MIN_ROWS = LockModel.MIN_PLATES;
@@ -156,6 +163,8 @@ public final class FanLocator {
     private static final double CROP_IN_FRAME = 0.85;
     /** Poses offered to the reader, most likely first. Each costs a read, and this runs once per F8. */
     private static final int MAX_POSES = 12;
+    /** How many pin lines are handed to the reader to choose between. See {@link #pinLines}. */
+    private static final int MAX_PIN_LINES = 4;
 
     /**
      * What the locator made of one frame: a pose, or the reason there is none - and an account
@@ -210,63 +219,51 @@ public final class FanLocator {
         // bridge two rows into one, invent rows of their own, and - worst, because it is silent -
         // drag the fan's centre off the average of the real rows.
         List<double[]> onLattice = onLattice(wells, rough);
-        List<Row> rough_rows = rows(onLattice, rough);
-        if (rough_rows.size() < MIN_ROWS) {
-            return Fit.refused(account(plane, wells.size(), rough_rows.size(),
-                    "the wells fall into " + rough_rows.size() + " row(s) of " + ROW_MIN_WELLS
-                            + "+ holes at the right spacing, and a lock is at least " + MIN_ROWS
-                            + "."));
+        List<Lattice> lattices = fit(onLattice, rough);
+        if (lattices.isEmpty()) {
+            return Fit.refused(account(plane, wells.size(), rows(onLattice, rough).size(),
+                    "the wells that sit on a row do not make a fan: either too few rows, or their "
+                            + "spacing across the rows and along them cannot be one scale, or no "
+                            + "slot-with-no-hole in one row predicts the others' - so these are not "
+                            + "one fan's plates."));
         }
-        // The scale, from ACROSS the rows - and then the hole spacing derived from it, rather than
-        // voted for. This is the pipeline's one real measurement and everything else leans on it.
-        // Two plates' rows sit exactly one rowPitch apart, and that distance survives the room's
-        // marks: they do not land on the comb the fan's rows make, so the median row gap simply does
-        // not see them. The spacing along a row cannot be measured that cleanly - it is what the
-        // marks corrupt, and perspective runs it 41-54 against an ideal of 48 anyway - so it is
-        // taken from the scale instead, where the ratio is fixed and known.
-        double pitch = pitch(rough_rows);
-        if (pitch <= 0) {
-            return Fit.refused(account(plane, wells.size(), rough_rows.size(),
-                    "the rows do not sit a plate step apart."));
-        }
-        double scale = pitch / FanGeometry.rowPitch();
-        double spacing = FanGeometry.holeStep() * scale;
-        if (Math.abs(rough - spacing) > SCALE_AGREE * spacing) {
-            return Fit.refused(account(plane, wells.size(), rough_rows.size(),
-                    String.format(Locale.ROOT,
-                            "the rows are there but they are not a fan: across them they sit %.1fpx "
-                            + "apart (scale %.3f), which wants holes %.1fpx apart along them, and "
-                            + "the holes are %.1fpx apart. One lattice cannot be two scales.",
-                            pitch, scale, spacing, rough)));
-        }
-        // Re-cluster with the spacing that is actually right, rather than the bootstrap's.
-        List<Row> rows = rows(onLattice, spacing);
-        if (rows.size() < MIN_ROWS) {
-            return Fit.refused(account(plane, wells.size(), rows.size(),
-                    "at the fan's own scale the wells fall into only " + rows.size() + " row(s)."));
-        }
-        Lattice lattice = fit(rows, spacing, scale);
-        if (lattice == null) {
-            return Fit.refused(account(plane, wells.size(), rows.size(),
-                    "the rows are there but their pins do not line up along the fan's depth: no "
-                            + "slot-with-no-hole in one row predicts the others', so these rows are "
-                            + "not one fan's plates."));
-        }
-        for (ViewMapping pose : lattice.poses(frame)) {
-            if (confirms(frame, pose)) {
-                return new Fit(pose, rows.size(), wells.size(), lattice.rms,
-                        found(plane, pose, lattice, wells.size(), rows.size()));
+        int rows = rows(onLattice, FanGeometry.holeStep() * lattices.getFirst().scale).size();
+        int tried = 0;
+        for (Lattice lattice : lattices) {
+            for (ViewMapping pose : lattice.poses(frame)) {
+                if (++tried > MAX_POSES) {
+                    break;
+                }
+                if (confirms(frame, pose)) {
+                    return new Fit(pose, rows, wells.size(), lattice.rms,
+                            found(plane, pose, lattice, wells.size(), rows));
+                }
             }
         }
-        return Fit.refused(account(plane, wells.size(), rows.size(),
+        return Fit.refused(account(plane, wells.size(), rows,
                 String.format(Locale.ROOT,
-                        "a lattice of %d rows fits at scale %.3f, but the reader sees no 4-7 plate "
-                        + "lock at any pose it implies. Being a lattice is not being a lock.",
-                        rows.size(), lattice.scale)));
+                        "a lattice of %d rows fits at scale %.3f, but the reader reads no lock at "
+                        + "any of the %d poses it implies. Being a lattice is not being a lock.",
+                        rows, lattices.getFirst().scale, tried)));
     }
 
     /**
-     * The final authority on a proposed pose: the reader must see a lock at it.
+     * The final authority on a proposed pose: the reader must <b>read</b> a lock at it - not merely
+     * count one.
+     *
+     * <p>Counting is not enough, and that was measured rather than feared. Asking only
+     * {@code detectPlateCount ∈ 4..7} accepted a pose <b>34px out</b> - 0.71 of a hole spacing - on
+     * {@code 7p-plate-2-sweep}. It can, because a row counts as a plate on
+     * {@code (walked == 6 || popped) && lit >= LIT_PLATE}: a popped pin sitting in lit steel carries
+     * a row whose holes never resolved at all. A locator that only has to satisfy that can be quite
+     * wrong and still be believed, which defeats the point of having an authority.
+     *
+     * <p>So every row must resolve as well: no {@link LockModel#UNKNOWN} in the state. That is the
+     * hole-to-hole walk landing on six holes in every row, which a pose off by a fraction of a
+     * spacing does not survive - the walk's steps stop adding up. It is a strict bar, and it should
+     * be: this is a pose the tool <i>invented</i>, on a frame it had already failed to read, and a
+     * wrong one is worse than none. A lock the reader can find but not read is left to the reader's
+     * own machinery, which is built for it; the locator's job is only to say where to look.
      *
      * <p>Always the {@link LatticeReader}, whatever {@code --reader} the run is using. This is a
      * question about <b>where the lock is</b>, and the tone-free reader is strictly the better
@@ -274,8 +271,17 @@ public final class FanLocator {
      * kind of frame that got here.
      */
     private static boolean confirms(BufferedImage frame, ViewMapping pose) {
-        int n = new LatticeReader(pose, Tone.estimate(frame, pose)).detectPlateCount(frame);
-        return n >= LockModel.MIN_PLATES && n <= LockModel.MAX_PLATES;
+        LatticeReader reader = new LatticeReader(pose, Tone.estimate(frame, pose));
+        int n = reader.detectPlateCount(frame);
+        if (n < LockModel.MIN_PLATES || n > LockModel.MAX_PLATES) {
+            return false;
+        }
+        for (int offset : reader.readState(frame, n)) {
+            if (offset == LockModel.UNKNOWN) {
+                return false;
+            }
+        }
+        return true;
     }
 
     // --- 1. the wells ----------------------------------------------------------------------------
@@ -641,10 +647,34 @@ public final class FanLocator {
     // --- 3. the rows -----------------------------------------------------------------------------
 
     /**
-     * One hole row: where it sits across the rows, its wells' positions along it, and how far each
-     * of those sits off the row's own straight line.
+     * One hole row, as its own straight line: where it sits across the rows at {@link #atAlong}, the
+     * {@link #slope} it climbs at from there, its wells' positions along it, and how far each of
+     * those sits off the line.
+     *
+     * <p>The slope is not a nicety. Each row carries a real residual tilt against the one global
+     * rotation angle - up to 2.3 degrees, measured - so "where the row sits across" is only a
+     * question with an answer once you say <b>where along it</b> you are asking about. See
+     * {@link #acrossAt}.
      */
-    record Row(double across, List<Double> along, List<Double> spread) {}
+    record Row(double across, double slope, double atAlong, List<Double> along, List<Double> spread) {
+
+        /**
+         * Where this row's line sits across the rows, at a given point along it.
+         *
+         * <p>This is what fixes the pitch, and the pitch is the only real measurement in the whole
+         * locator. Taking a row's across as the mean of its own holes is biased, because the holes
+         * are not centred on the pin and the row is tilted: measured on
+         * {@code 3840x2160/front-plate-sweep/step-0}, plate 0's holes average 180px to the left of
+         * its pin, and at that row's -1.6 degree tilt (the deskew's own prediction) that is 5.0px of
+         * across - which accounts for a measured 3.8px error to within a pixel. Every row is wrong
+         * by its own amount, in its own direction, so the pitch between them came out 2.8% short;
+         * and a 2.8% error in the scale compounds over six slots into more than a hole's width, at
+         * which point no pin proposal matches any other and the fan is refused.
+         */
+        double acrossAt(double along) {
+            return across + slope * (along - atAlong);
+        }
+    }
 
     /**
      * The wells, grouped into rows: project them across the row direction and cut where the gap is
@@ -707,7 +737,7 @@ public final class FanLocator {
             along.add(well[1]);
             spread.add(well[0] - (meanY + slope * (well[1] - meanX)));
         }
-        rows.add(new Row(meanY, along, spread));
+        rows.add(new Row(meanY, slope, meanX, along, spread));
     }
 
     /**
@@ -787,25 +817,110 @@ public final class FanLocator {
     }
 
     /**
-     * Solves the three unknowns - a scale and a translation; the game's pose is fixed, so there is no
-     * rotation to solve for - out of the rows.
+     * Solves the three unknowns - a scale and a translation; the game's pose is fixed, so there is
+     * no rotation to solve for - out of the wells, refining until the answer stops moving.
      *
-     * <p>The scale comes from <b>across</b> the rows: they sit one {@code rowPitch} apart, and that
-     * distance falls straight out of having grouped the wells into rows. It is cross-checked against
-     * the spacing <b>along</b> a row, which is the same scale measured a different way; the two
-     * disagreeing means these rows are not one fan.
+     * <p>It refines because the two measurements need each other. The <b>scale</b> comes from across
+     * the rows, where they sit one {@code rowPitch} apart - the one measurement the room's marks
+     * cannot corrupt, because they do not land on the comb the fan's rows make. But a row's across
+     * is only well defined <i>at a point along it</i> ({@link Row#acrossAt}), and the point that
+     * matters is its <b>pin</b>. And the pins cannot be found without the hole spacing, which is
+     * derived from the scale. So: measure the rows roughly, find the pins, measure the rows again at
+     * those pins, and repeat. It converges in two passes because the first one is already within a
+     * few percent; the loop just stops guessing about it.
      *
-     * <p>The translation needs the pins, and a pin is the slot with no hole in it. Where a row's
-     * chain has its double gap, that is the pin and there is nothing to decide. Where the chain is
-     * unbroken the pin is one step off one end - and which end is the difference between a plate at
-     * -3 and one at +3, which no single row can answer. The fan answers it: every pin lies on one
-     * line along the depth step, so a pin proposed for any row predicts the pin of every other, and
-     * the proposal the other rows agree with is the right one.
+     * <p>The pins themselves are a vote. Each row offers every slot it cannot rule out (see
+     * {@link #pins}), no row is trusted about itself, and the fan decides: every pin lies on one
+     * line along the depth step, so a proposal in any row predicts the pin of every other, and the
+     * proposal the rest agree with is the pin.
      */
-    private Lattice fit(List<Row> rows, double spacing, double scale) {
-        double step = FanGeometry.depthStepAlongRow() * scale;
-        double best = Double.NaN;
-        int support = 0;
+    private List<Lattice> fit(List<double[]> onLattice, double rough) {
+        // Pass one has no scale yet, so it measures the rows where their own holes put them and
+        // takes the pitch from that. That is biased by each row's tilt (see Row.acrossAt) - but only
+        // by a few percent, which is close enough to find the pins with, and the pins are what let
+        // pass two measure the rows where it actually matters.
+        double scale = bootstrap(onLattice, rough);
+        if (scale <= 0) {
+            return List.of();
+        }
+        List<Lattice> out = List.of();
+        for (int pass = 1; pass < REFINE_PASSES; pass++) {
+            double spacing = FanGeometry.holeStep() * scale;
+            // The two ways of reading the scale - across the rows and along them - have to agree, or
+            // these rows are not one fan at one scale.
+            if (Math.abs(rough - spacing) > SCALE_AGREE * rough) {
+                return List.of();
+            }
+            List<Row> rows = rows(onLattice, spacing);
+            if (rows.size() < MIN_ROWS) {
+                return out;
+            }
+            double step = FanGeometry.depthStepAlongRow() * scale;
+            List<Double> lines = pinLines(rows, spacing, step);
+            if (lines.isEmpty()) {
+                return out;
+            }
+            out = new ArrayList<>();
+            for (double backPin : lines) {
+                out.add(lattice(rows, backPin, step, scale));
+            }
+            // Re-read the scale off the rows measured at the best line's pins, where they are not
+            // biased by their own tilt, and go round again.
+            scale = out.getFirst().scale();
+        }
+        return out;
+    }
+
+    /** One line's lattice: the fan centre it implies, and the scale it was built at. */
+    private static Lattice lattice(List<Row> rows, double backPin, double step, double scale) {
+        double along = 0, across = 0;
+        double[] at = new double[rows.size()];
+        for (int j = 0; j < rows.size(); j++) {
+            double pin = backPin - j * step;
+            along += pin;
+            at[j] = rows.get(j).acrossAt(pin);
+            across += at[j];
+        }
+        // The centroid of the pins IS the fan centre, exactly, for every plate count - the plate
+        // depths sum to zero whatever n is. That is the whole translation solve.
+        double pitch = medianGap(at);
+        return new Lattice(pitch > 0 ? pitch / FanGeometry.rowPitch() : scale,
+                along / rows.size(), across / rows.size(), rms(rows));
+    }
+
+    /** A first scale, from the rows as their own holes place them: biased, but only by a few %. */
+    private double bootstrap(List<double[]> onLattice, double rough) {
+        List<Row> rows = rows(onLattice, rough);
+        if (rows.size() < MIN_ROWS) {
+            return -1;
+        }
+        double[] across = new double[rows.size()];
+        for (int j = 0; j < rows.size(); j++) {
+            across[j] = rows.get(j).across();
+        }
+        double pitch = medianGap(across);
+        return pitch <= 0 ? -1 : pitch / FanGeometry.rowPitch();
+    }
+
+    /**
+     * Every pin line the rows will support, best first: each is the back-most row's pin, from which
+     * the depth step names every other. Empty when nothing a lock's worth of rows agree on exists.
+     *
+     * <p><b>It returns several on purpose, and that is not hedging.</b> No row can be sure of its
+     * own pin - an unbroken chain of six holes is a plate at -3 or one at +3, and there is nothing
+     * in the row to say which - so each offers every slot it cannot rule out and the fan is supposed
+     * to decide. It usually does. But the rows have gaps in them (the wells are ~90% of the holes),
+     * and a row with gaps offers more slots, and enough of those and a <b>second</b> line can be
+     * drawn through one candidate per row that is just as collinear as the true one. Measured, the
+     * best-supported line is sometimes exactly one slot off the truth - which is the worst possible
+     * error, because a one-slot shift still looks like a lattice.
+     *
+     * <p>Nothing in the geometry breaks that tie. What breaks it is the pixels: the reader, at each
+     * pose in turn, and a lock is only read at the true one. So the tie is handed to it rather than
+     * guessed at here.
+     */
+    private List<Double> pinLines(List<Row> rows, double spacing, double step) {
+        List<double[]> lines = new ArrayList<>(); // {backPin, support}
         for (int j = 0; j < rows.size(); j++) {
             for (double pin : pins(rows.get(j), spacing)) {
                 int agree = 0;
@@ -818,52 +933,101 @@ public final class FanLocator {
                         }
                     }
                 }
-                if (agree > support) {
-                    support = agree;
-                    best = pin + j * step; // the back-most row's pin, so the line is anchored once
+                double back = pin + j * step; // anchored on the back row, so a line is named once
+                if (agree >= MIN_ROWS && !isNear(names(lines), back, spacing)) {
+                    lines.add(new double[] {back, agree});
                 }
             }
         }
-        if (support < MIN_ROWS) {
-            return null;
+        lines.sort(Comparator.comparingDouble((double[] a) -> -a[1]));
+        List<Double> out = new ArrayList<>();
+        for (double[] line : lines.subList(0, Math.min(MAX_PIN_LINES, lines.size()))) {
+            out.add(line[0]);
         }
-        double centreAlong = 0, centreAcross = 0;
-        for (int j = 0; j < rows.size(); j++) {
-            centreAlong += best - j * step;
-            centreAcross += rows.get(j).across();
+        return out;
+    }
+
+    private static List<Double> names(List<double[]> lines) {
+        List<Double> out = new ArrayList<>();
+        for (double[] line : lines) {
+            out.add(line[0]);
         }
-        return new Lattice(scale, centreAlong / rows.size(), centreAcross / rows.size(), rms(rows));
+        return out;
+    }
+
+    /** The median gap in an ascending run - robust to a row the fan does not own. */
+    private static double medianGap(double[] across) {
+        if (across.length < 2) {
+            return -1;
+        }
+        double[] gaps = new double[across.length - 1];
+        for (int i = 1; i < across.length; i++) {
+            gaps[i - 1] = across[i] - across[i - 1];
+        }
+        Arrays.sort(gaps);
+        return gaps[gaps.length / 2];
     }
 
     /**
-     * Where this row's pin can be: the middle of its double gap, or - for an unbroken chain - one
-     * step off either end. A chain that is neither says nothing about its pin, and offers nothing.
+     * Every place this row's pin could be: a slot on the row's own lattice, within reach of all its
+     * holes, with <b>no hole on it</b>.
+     *
+     * <p>The obvious version of this is wrong, and it is worth saying how, because it looks right.
+     * A plate shows six of seven slots and the pin fills the seventh, so the pin is the row's double
+     * gap - and where the chain has one, that is that. Except the wells are only ~90% of the holes,
+     * and <b>a missing hole makes exactly the same double gap</b>. Measured on
+     * {@code 3840x2160/front-plate-sweep/step-0}, plate 0's 1.83-spacing gap is a hole that was
+     * never detected, at 2953; the real pin is at 3140, two slots past the chain's far end. Reading
+     * the gap as the pin put that row's proposal 180px out. And a five-hole chain with no gap at all
+     * - the other thing missing recall does - proposed nothing, so the row abstained. Between them
+     * these left three rows supporting the truth where four were needed, and the fit was refused on
+     * a frame it had otherwise solved.
+     *
+     * <p>So no row is asked to be sure. Each offers every slot it cannot rule out, and the fan
+     * decides: the pins lie on one line along the depth step, so a proposal in any row predicts the
+     * pin of every other, and the one the rest agree with is the pin. A row that is wrong about
+     * itself simply fails to be agreed with.
      */
     private static List<Double> pins(Row row, double spacing) {
         List<Double> along = row.along();
-        for (int i = 1; i < along.size(); i++) {
-            double gap = along.get(i) - along.get(i - 1);
-            if (gap >= PIN_GAP_MIN * spacing && gap <= PIN_GAP_MAX * spacing) {
-                return List.of((along.get(i) + along.get(i - 1)) / 2);
+        List<Double> out = new ArrayList<>();
+        // Anchor the lattice on each hole in turn and step out to every slot the pin could occupy.
+        // Anchoring on each of them rather than on one is what keeps a missing hole from shifting
+        // the whole lattice: the true pin is a whole number of slots from every real hole.
+        for (double anchor : along) {
+            for (int m = -FanGeometry.HOLES_PER_PLATE; m <= FanGeometry.HOLES_PER_PLATE; m++) {
+                double slot = anchor + m * spacing;
+                if (!couldBePin(along, slot, spacing) || isNear(out, slot, spacing)) {
+                    continue;
+                }
+                out.add(slot);
             }
         }
-        if (along.size() == FanGeometry.HOLES_PER_PLATE) {
-            return List.of(along.getFirst() - spacing, along.getLast() + spacing);
-        }
-        return List.of();
+        return out;
     }
 
-    /** The median distance between adjacent rows, across them. */
-    private static double pitch(List<Row> rows) {
-        List<Double> gaps = new ArrayList<>();
-        for (int i = 1; i < rows.size(); i++) {
-            gaps.add(rows.get(i).across() - rows.get(i - 1).across());
+    /**
+     * True when a pin at {@code slot} would explain this row: no hole sits on it, and every hole it
+     * does have is within the seven slots a plate spans.
+     */
+    private static boolean couldBePin(List<Double> along, double slot, double spacing) {
+        for (double hole : along) {
+            double slots = Math.abs(hole - slot) / spacing;
+            if (slots < 1 - SAME_PIN || slots > FanGeometry.HOLES_PER_PLATE + SAME_PIN) {
+                return false; // a hole on the pin, or a hole too far away to be this plate's
+            }
         }
-        if (gaps.isEmpty()) {
-            return -1;
+        return true;
+    }
+
+    /** True when {@code slot} is already offered, so the same proposal is not made twice. */
+    private static boolean isNear(List<Double> offered, double slot, double spacing) {
+        for (double at : offered) {
+            if (Math.abs(at - slot) <= SAME_PIN * spacing) {
+                return true;
+            }
         }
-        gaps.sort(Comparator.naturalOrder());
-        return gaps.get(gaps.size() / 2);
+        return false;
     }
 
     /**
