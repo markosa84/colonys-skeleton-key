@@ -92,63 +92,6 @@ public final class FanGeometry {
     /** Dark holes per plate: the 7 holes minus the one the pin occupies. */
     public static final int HOLES_PER_PLATE = 2 * LockModel.MAX_OFFSET;
 
-    // --- The fan as a lattice, in reference units. Everything above says where the lock is once you
-    // --- know the mapping; these say what shape it is, which is what lets {@link FanLocator} solve
-    // --- for the mapping from the pixels instead of being told it. All derived, none new.
-
-    /**
-     * The direction a hole row runs in <b>screen</b> space, as a unit vector - the first basis
-     * vector of the fan's lattice. It is {@link #ROT_DEG} undone: rotating by that lays the rows
-     * flat, so on screen they climb at exactly its negation. Angles are untouched by uniform
-     * scaling, so this is the same on any display - which is what makes it something a locator can
-     * gate on rather than solve for.
-     */
-    static double[] rowDirection() {
-        double t = Math.toRadians(-ROT_DEG);
-        return new double[] {Math.cos(t), Math.sin(t)};
-    }
-
-    /** One plate step toward the back of the fan, in reference px: the second basis vector. */
-    static double[] depthStep() {
-        return new double[] {DEPTH_STEP_X, DEPTH_STEP_Y};
-    }
-
-    /**
-     * How far apart two plates' rows sit <b>across</b> the rows, in reference px - the depth step's
-     * component along the row perpendicular, measured 61.28.
-     *
-     * <p>This is the honest way to read the scale off a frame, and better than {@code |depthStep|}
-     * for it: the perpendicular distance between two rows falls out of clustering the holes into
-     * rows, which has to happen anyway, while the depth step's <i>parallel</i> component can only be
-     * had once each row's pin is known.
-     */
-    static double rowPitch() {
-        double[] u = rowDirection();
-        return Math.abs(DEPTH_STEP_X * -u[1] + DEPTH_STEP_Y * u[0]);
-    }
-
-    /** The depth step's component <b>along</b> a row, in reference px: measured 32.63. */
-    static double depthStepAlongRow() {
-        double[] u = rowDirection();
-        return DEPTH_STEP_X * u[0] + DEPTH_STEP_Y * u[1];
-    }
-
-    /** The ideal hole spacing along a row. Perspective really runs it 41-54; see {@link #STEP_MIN}. */
-    static double holeStep() {
-        return STEP_IDEAL;
-    }
-
-    /**
-     * Where the fan is centred, in reference px - and it is exactly the <b>centroid of the pins</b>,
-     * for every plate count. Plate {@code i} of {@code n} sits at {@code (n-1)/2 - i} steps, and
-     * those depths sum to zero whatever {@code n} is, so the pins average to this point and nowhere
-     * else. That is the one fact that lets a locator fix the translation without first knowing how
-     * many plates it is looking at.
-     */
-    static double[] referenceFanCenter() {
-        return new double[] {FAN_CENTER_X, FAN_CENTER_Y};
-    }
-
     // --- The same quantities, mapped onto the actual view.
 
     private final ViewMapping mapping;
