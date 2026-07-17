@@ -5,8 +5,13 @@ import java.awt.image.BufferedImage;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Function;
+import java.util.stream.Stream;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.MethodSource;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
@@ -154,7 +159,7 @@ class GameScreenTest {
      */
     @Test
     void theSameCounterAlwaysHashesTheSame() {
-        grabber.frames = box -> counter(box, 3, 255); // three dark digit pixels on white
+        grabber.frames = box -> counter(box, 300, 74, 255);
         GameScreen screen = new GameScreen(grabber, Viewport.REFERENCE);
 
         assertEquals(screen.pickCounterFingerprint(), screen.pickCounterFingerprint());
@@ -164,9 +169,9 @@ class GameScreenTest {
     void aDigitChangingChangesTheHash() {
         GameScreen screen = new GameScreen(grabber, Viewport.REFERENCE);
 
-        grabber.frames = box -> counter(box, 3, 255);
+        grabber.frames = box -> counter(box, 300, 74, 255);
         long fivePicks = screen.pickCounterFingerprint();
-        grabber.frames = box -> counter(box, 4, 255); // one more dark pixel: the digits changed
+        grabber.frames = box -> counter(box, 301, 74, 255); // one more ink pixel: the digits changed
         long fourPicks = screen.pickCounterFingerprint();
 
         assertNotEquals(fivePicks, fourPicks, "a pick broke, and the counter says so");
@@ -180,12 +185,115 @@ class GameScreenTest {
     void aBrighterCounterWithTheSameDigitsHashesTheSame() {
         GameScreen screen = new GameScreen(grabber, Viewport.REFERENCE);
 
-        grabber.frames = box -> counter(box, 3, 255);
+        grabber.frames = box -> counter(box, 300, 74, 255);
         long onWhite = screen.pickCounterFingerprint();
-        grabber.frames = box -> counter(box, 3, 200); // still light, just dimmer
+        grabber.frames = box -> counter(box, 300, 74, 200); // still light, just dimmer
         long onGrey = screen.pickCounterFingerprint();
 
         assertEquals(onWhite, onGrey);
+    }
+
+    /**
+     * A box with no panel in it at all - which is what a viewport pointing at the wrong rectangle
+     * grabs - must still hash deterministically. There is nothing useful to say about a counter that
+     * is not there, and this is not the method that should say it: a wrong viewport is reported far
+     * more loudly by the reader finding no lock.
+     */
+    @Test
+    void aBoxWithNoPanelInItStillHashesDeterministically() {
+        GameScreen screen = new GameScreen(grabber, Viewport.REFERENCE); // the fake grabs black
+
+        assertEquals(screen.pickCounterFingerprint(), screen.pickCounterFingerprint());
+    }
+
+    /**
+     * <b>Every panel the game has ever been measured showing, and the hash sees the digits in all of
+     * them - with no tone curve and no absolute level anywhere in it.</b> The pairs are the gamma
+     * slider's own signature (CLAUDE.md's table, 0/244 at gamma 1.2 through 100/255 at 3.2) plus the
+     * two an HDR tonemap produces, which are off the slider's range entirely and are what the
+     * reporters' frames measure.
+     *
+     * <p>The old absolute cut of 110 passes most of this list too, and measured, it was not broken
+     * on any real frame in the corpus. What it did not have was a <i>reason</i> to keep working: it
+     * cleared gamma 3.2's digits by ten levels, and it cleared an HDR panel's only because the tone
+     * put a wrong-family curve on them. This list is the shape of the argument that replaces that
+     * luck - each pair is a fact about the game, and the cut is derived from the pair rather than
+     * asserted over it.
+     */
+    @ParameterizedTest(name = "ink {0} on white {1}")
+    @CsvSource({
+            "0, 244",    // gamma 1.2 - the ink has crushed to black
+            "9, 253",    // gamma 1.5
+            "24, 255",   // gamma 1.8
+            "41, 255",   // gamma 2.1
+            "58, 255",   // gamma 2.4
+            "74, 255",   // gamma 2.7 - the calibration
+            "91, 255",   // gamma 3.0
+            "100, 255",  // gamma 3.2 - the top of the slider
+            "11, 183",   // HDR, as three reporters' frames measure it
+            "36, 199",
+    })
+    void theHashFollowsTheDigitsAtEveryPanelTheGameHasBeenMeasuredShowing(int ink, int white) {
+        GameScreen screen = new GameScreen(grabber, Viewport.REFERENCE);
+
+        grabber.frames = box -> counter(box, 300, ink, white);
+        long fivePicks = screen.pickCounterFingerprint();
+        grabber.frames = box -> counter(box, 301, ink, white);
+        long fourPicks = screen.pickCounterFingerprint();
+
+        assertNotEquals(fivePicks, fourPicks,
+                "ink " + ink + " on white " + white + ": the digits changed and the hash did not, "
+                        + "so a broken pick would be invisible");
+    }
+
+    /**
+     * <b>The same thing, on real panels rather than modelled ones</b>, over the whole gamma slider.
+     * Blanking the counter out must move the hash - which is exactly the claim that the hash is made
+     * of the digits. A reader that has gone blind hashes the blanked box and the real one to the
+     * same value, because to it they are both "all light".
+     *
+     * <p>The corpus has no frame pair where the counter really changes (no pick was ever spent
+     * capturing it), so the digits are removed rather than decremented. It is the same question
+     * asked backwards, and it needs no lockpick.
+     */
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("gammaFrames")
+    void theHashIsMadeOfTheDigitsOnEveryRealPanelInTheCorpus(String frame, Viewport viewport) {
+        BufferedImage real = TestFrames.load(frame);
+        BufferedImage blanked = withoutTheDigits(real, GameScreen.picksBox(viewport));
+
+        long withDigits = new GameScreen(new FrameGrabber(real), viewport).pickCounterFingerprint();
+        long without = new GameScreen(new FrameGrabber(blanked), viewport).pickCounterFingerprint();
+
+        assertNotEquals(withDigits, without,
+                frame + ": the counter's digits do not reach the hash, so a broken pick would be "
+                        + "invisible at this gamma");
+    }
+
+    static Stream<Arguments> gammaFrames() {
+        return FrameCorpus.gammaFrames().map(a -> Arguments.of(a.get()[0], a.get()[1]));
+    }
+
+    /** The counter box painted over with its own panel white: the number gone, the panel intact. */
+    private static BufferedImage withoutTheDigits(BufferedImage frame, Rectangle box) {
+        BufferedImage out = new BufferedImage(frame.getWidth(), frame.getHeight(),
+                BufferedImage.TYPE_INT_RGB);
+        out.getGraphics().drawImage(frame, 0, 0, null);
+        int panel = frame.getRGB(box.x + box.width / 2, box.y + 1); // the panel's own top edge
+        for (int y = box.y; y < box.y + box.height; y++) {
+            for (int x = box.x; x < box.x + box.width; x++) {
+                out.setRGB(x, y, panel);
+            }
+        }
+        return out;
+    }
+
+    /** Crops a whole frame to whatever box is asked for - what the live Robot hands back. */
+    private record FrameGrabber(BufferedImage frame) implements ScreenGrabber {
+        @Override
+        public BufferedImage grab(Rectangle box) {
+            return frame.getSubimage(box.x, box.y, box.width, box.height);
+        }
     }
 
     /** An image whose corners are identifiable, so a composite that slips can be caught. */
@@ -201,19 +309,22 @@ class GameScreenTest {
         return img;
     }
 
-    /** The lockpick counter: {@code darkPixels} near-black digit pixels on a {@code bg}-grey box. */
-    private static BufferedImage counter(Rectangle box, int darkPixels, int bg) {
+    /** The lockpick counter: {@code inkPixels} digit pixels at {@code ink} on a {@code white} box. */
+    private static BufferedImage counter(Rectangle box, int inkPixels, int ink, int white) {
         BufferedImage img = new BufferedImage(box.width, box.height, BufferedImage.TYPE_INT_RGB);
-        int light = (bg << 16) | (bg << 8) | bg;
         for (int y = 0; y < box.height; y++) {
             for (int x = 0; x < box.width; x++) {
-                img.setRGB(x, y, light);
+                img.setRGB(x, y, grey(white));
             }
         }
-        for (int i = 0; i < darkPixels; i++) {
-            img.setRGB(10 + i, 10, 0x101010); // luminance 16: unambiguously a digit
+        for (int i = 0; i < inkPixels; i++) {
+            img.setRGB(i % box.width, i / box.width, grey(ink));
         }
         return img;
+    }
+
+    private static int grey(int level) {
+        return (level << 16) | (level << 8) | level;
     }
 
     /** Hands back whatever the test says is on screen, and remembers what was asked for. */

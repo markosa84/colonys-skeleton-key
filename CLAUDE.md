@@ -513,12 +513,17 @@ others silently breaks the automation. `KeySenderTest` and `LockSolverTest` pin 
   for `dir +1` = `A` = LEFT.
 - **Connections are directed per-mover:** `connections[p]` lists what moving `p` drags, each entry a
   `Connection(target, NORMAL|INVERTED)`. No cascade — a dragged plate's own row does not fire.
-- **The lockpick counter is thresholded, so the gamma reaches the break detector too.**
-  `GameScreen.PICKS_DARK_MAX = 110` splits the digits from the panel behind them — and the digits move
-  with the slider: 74 at the calibration, **101 at gamma 3.2**, nine levels under the threshold. A
-  little more brightness and every pixel in the box reads "light", the hash stops depending on the
-  digits, and **a broken pick becomes invisible** — silently, in the one signal `LockSession` trusts
-  to notice it. `pickCounterFingerprint` maps through the `Tone` first. Don't unpick that.
+- **The lockpick counter is thresholded against its OWN ink and white — no `Tone`, no constant.**
+  `pickCounterFingerprint` histograms the panel per grab and cuts at the midpoint of its two plateaus
+  (`Tone.panelSplit`, shared with the gamma probe, which indexes the family by the same two numbers).
+  It used to cut at an absolute `PICKS_DARK_MAX = 110` after mapping through the `Tone`, and
+  **measured, that was never broken** — 37–40% of the box dark on the whole gamma corpus *and* all
+  three HDR dumps. It was lucky twice: 110 cleared gamma 3.2's ink (**100**) by ten levels, and it
+  cleared an HDR panel's ink only because the `Tone` put a **wrong-family curve** on it (the one
+  `LatticeReader` refuses to use, landing those digits at ~72–75). The plateaus are never closer
+  than **155 levels** across everything measured (1.2: 0/244; 3.2: 100/255; HDR: 11–36/183–199), so
+  their midpoint needs no luck. **Don't put an absolute level back**, and note `GameScreen` no longer
+  takes a `Tone` at all.
 - **Screen capture needs ALL THREE.** Two are the DPI half: `Win32.setProcessDpiAware()` (before any
   AWT init) **and** `-Dsun.java2d.uiScale=1`. The dev display is 4K at 200% scaling; either alone
   yields a wrong (scaled/black) capture. See `.claude` project memory `screen-capture-dpi` for
