@@ -36,7 +36,7 @@ class CaptureBoxTest {
     static Stream<Viewport> viewports() {
         List<Viewport> all = new ArrayList<>();
         all.add(Viewport.REFERENCE);
-        for (String mode : LockReaderTest.SWEEP_MODES) {
+        for (String mode : FrameCorpus.SWEEP_MODES) {
             String[] wh = mode.split("x");
             all.add(new Viewport(Integer.parseInt(wh[0]), Integer.parseInt(wh[1])));
         }
