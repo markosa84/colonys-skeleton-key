@@ -90,6 +90,41 @@ public final class FanLocator {
      */
     private static final double RULE_LEN = 710.0;
 
+    // --- The lockpick counter's white panel, measured. The rule finds the HUD; this places it.
+
+    /**
+     * The panel's own white box, in reference px - measured (3114, 1620) to (3165, 1671), the same
+     * on every frame in the corpus, at every gamma, and on both reporters' HDR dumps.
+     *
+     * <p>Note this is <b>not</b> {@code GameScreen.picksBox} (3104, 1616, 72x56), which is a box
+     * drawn <i>around</i> the panel with room to spare, because all {@link Tone} wants from it is a
+     * histogram. What is measured here is the white itself, and its edges are razor sharp.
+     */
+    private static final double PANEL_X0 = 3114.0, PANEL_Y0 = 1620.0, PANEL_X1 = 3165.0;
+    private static final double PANEL_MID = (PANEL_X0 + PANEL_X1) / 2;
+
+    /**
+     * The distance from the rule to the panel, in reference px - and the reason the two are used
+     * together rather than either alone.
+     *
+     * <p>The rule is a fine ruler and a poor anchor: it tapers, and not symmetrically, so which
+     * pixel is its last is a little arbitrary and its centre is only good to about 8px. The panel is
+     * the opposite - 51px is far too short to read a scale off, but its edges are sharp and its
+     * position is good to a pixel. So each is asked only what it is good at: the panel says
+     * <b>where</b>, and the gap between them says <b>how big</b>. That gap is nearly twice the
+     * rule's own length, so it is the better ruler as well.
+     */
+    private static final double BASELINE = PANEL_Y0 - RULE_Y;
+
+    /** How far the panel is hunted for, either way, around where the rule says it should be. */
+    private static final int PANEL_HUNT = 70;
+    /** The percentile of the hunting window the panel's white stands above. */
+    private static final double PANEL_BRIGHT = 0.90;
+    /** How far the two independent scales - the rule's length, and the baseline - may disagree. */
+    private static final double SCALE_AGREE = 0.06;
+    /** How far the panel's measured width may sit from what the solved scale says it should be. */
+    private static final double PANEL_SIZE_TOL = 0.20;
+
     /** Long side the frame is worked at, which is what makes the rule's thickness a constant. */
     private static final int WORK_LONG_SIDE = 1280;
     /**
@@ -137,17 +172,22 @@ public final class FanLocator {
      * How far the search nudges a pose around what the rule says, in reference px, and in what
      * steps.
      *
-     * <p>The rule fixes the scale to a tenth of a percent but its <b>centre</b> only to about 8px:
-     * it tapers, so which pixel is its last is a little arbitrary, and the taper is not symmetric.
-     * The reader needs better than that - a pin 14px off puts the next hole 34px away, under the
-     * walk's 36px floor, and the row stops adding up. So the pose is nudged until it reads.
+     * <p>The two landmarks between them leave a few pixels of slack, and the reader is unforgiving
+     * of it: a pin 14px off puts the next hole 34px away, under the walk's 36px floor, and the row
+     * stops adding up. So the pose is nudged until it reads.
      *
-     * <p>This is a search the lattice locator could never have run: it is only sound because the
-     * rule has already said which slot is which. Half a hole spacing is 24 reference px, and the
-     * whole search is narrower than that, so nothing in it can land on the wrong slot. The reader
-     * cannot tell one slot from the next - but that is not what it is being asked.
+     * <p>This is a search the lattice locator could never have run: it is only sound because the HUD
+     * has already said which slot is which. Half a hole spacing is 24 reference px, and the whole
+     * search is narrower than that, so nothing in it can land on the wrong slot. The reader cannot
+     * tell one slot from the next - but that is not what it is being asked.
+     *
+     * <p><b>Do not widen it.</b> Measured: at 16 the locator finds three more locks and misreads
+     * nine, where at 8 it misreads one. A wider search does not find the truth further out - it
+     * manufactures falsehoods nearer in, because the further it wanders the more likely it is to
+     * meet a pose at which a <i>smaller</i> fan reads consistently. The answer to a pose that is out
+     * by more than this is a better landmark, never a bigger net.
      */
-    private static final int NUDGE = 20, NUDGE_STEP = 4;
+    private static final int NUDGE = 8, NUDGE_STEP = 4;
 
     /**
      * What the locator made of one frame: a pose, or the reason there is none - and an account
@@ -184,13 +224,15 @@ public final class FanLocator {
         }
         int tried = 0;
         for (double[] rule : rules) {
-            ViewMapping read = pose(plane, rule);
-            if (read == null) {
+            ViewMapping rough = pose(plane, rule);
+            if (rough == null || !onFrame(frame, rough)) {
                 continue;
             }
-            // The counter panel first: it is far cheaper than a read, and it is what tells the
-            // overlay from a beam in the room.
-            if (Tone.estimate(frame, read).isGuess() || !onFrame(frame, read)) {
+            // The counter panel: the second landmark, and the one that actually places the HUD.
+            // Also the thing that tells the overlay from a beam in the room - a beam has no white
+            // panel 1329px under it - and it costs far less than a read.
+            ViewMapping read = place(frame, rough, plane.toFrame(rule[0]));
+            if (read == null || !onFrame(frame, read)) {
                 continue;
             }
             // Every nudge that reads, and then the LARGEST lock among them - not the nearest.
@@ -339,7 +381,121 @@ public final class FanLocator {
                 p.toFrame(rule[0]) - RULE_Y * scale);
     }
 
-    /** The pose, and the small neighbourhood around it the rule cannot resolve. See {@link #NUDGE}. */
+    /**
+     * The pose the rule and the counter panel fix between them, or null when there is no panel where
+     * the rule says one should be.
+     *
+     * <p>The rule alone gives a pose good to a few percent, which is enough to know where to look
+     * for the panel and not much else. The panel then does the placing: its edges are sharp, so its
+     * box is good to a pixel where the rule's tapered ends are good to eight, and the long gap up to
+     * the rule ({@link #BASELINE}) is a better ruler than the rule itself. The rule's own length is
+     * kept as an independent second opinion on the scale, and the two must agree.
+     */
+    private static ViewMapping place(BufferedImage frame, ViewMapping rough, double ruleY) {
+        double[] panel = panel(frame, rough);
+        if (panel == null) {
+            return null;
+        }
+        double scale = (panel[1] - ruleY) / BASELINE;
+        if (scale < MIN_SCALE || scale > MAX_SCALE
+                || Math.abs(scale - rough.scale()) > SCALE_AGREE * rough.scale()) {
+            return null; // the two rulers disagree, so this is not one overlay
+        }
+        // And the panel has to be the size the scale says it is. This is what stops a bright blob
+        // that merely happens to sit near where an impostor rule predicts a panel: it is free (the
+        // box is already measured), and it is independent of both rulers, being a width where they
+        // are a length along x and a distance in y.
+        double width = panel[2] - panel[0];
+        if (Math.abs(width - (PANEL_X1 - PANEL_X0) * scale) > PANEL_SIZE_TOL * width) {
+            return null;
+        }
+        return new ViewMapping(scale, (panel[0] + panel[2]) / 2 - PANEL_MID * scale,
+                panel[1] - PANEL_Y0 * scale);
+    }
+
+    /**
+     * The counter panel's white box near where {@code rough} says it is, as {@code {x0, y0, x1}}:
+     * the biggest bright blob in the neighbourhood. The panel is the brightest flat thing on the
+     * screen and its surroundings are the lock's own dark casing, so "biggest and bright" finds it
+     * without a level - the cut is a percentile of the window, which no tone map moves.
+     */
+    private static double[] panel(BufferedImage frame, ViewMapping rough) {
+        int x0 = clamp((int) rough.x(PANEL_X0 - PANEL_HUNT), frame.getWidth());
+        int y0 = clamp((int) rough.y(PANEL_Y0 - PANEL_HUNT), frame.getHeight());
+        int x1 = clamp((int) rough.x(PANEL_X1 + PANEL_HUNT), frame.getWidth());
+        int y1 = clamp((int) rough.y(PANEL_Y0 + PANEL_HUNT), frame.getHeight());
+        int w = x1 - x0, h = y1 - y0;
+        if (w < 4 || h < 4) {
+            return null;
+        }
+        int[] lum = new int[w * h];
+        int[] hist = new int[256];
+        for (int y = 0; y < h; y++) {
+            for (int x = 0; x < w; x++) {
+                int l = LockReader.luminance(frame.getRGB(x0 + x, y0 + y));
+                lum[y * w + x] = l;
+                hist[l]++;
+            }
+        }
+        int cut = percentile(hist, (long) w * h, PANEL_BRIGHT);
+        boolean[] seen = new boolean[w * h];
+        int[] stack = new int[w * h];
+        double[] best = null;
+        int bestArea = 0;
+        for (int seed = 0; seed < w * h; seed++) {
+            if (seen[seed] || lum[seed] < cut) {
+                continue;
+            }
+            int sp = 0;
+            stack[sp++] = seed;
+            seen[seed] = true;
+            int area = 0, minX = w, maxX = -1, minY = h;
+            while (sp > 0) {
+                int p = stack[--sp];
+                int px = p % w, py = p / w;
+                area++;
+                minX = Math.min(minX, px);
+                maxX = Math.max(maxX, px);
+                minY = Math.min(minY, py);
+                for (int dy = -1; dy <= 1; dy++) {
+                    for (int dx = -1; dx <= 1; dx++) {
+                        int nx = px + dx, ny = py + dy;
+                        if (nx < 0 || ny < 0 || nx >= w || ny >= h) {
+                            continue;
+                        }
+                        int q = ny * w + nx;
+                        if (!seen[q] && lum[q] >= cut) {
+                            seen[q] = true;
+                            stack[sp++] = q;
+                        }
+                    }
+                }
+            }
+            if (area > bestArea) {
+                bestArea = area;
+                best = new double[] {x0 + minX, y0 + minY, x0 + maxX};
+            }
+        }
+        return best;
+    }
+
+    private static int clamp(int v, int max) {
+        return Math.max(0, Math.min(max, v));
+    }
+
+    /** The luminance the given fraction of a window's pixels fall below. */
+    private static int percentile(int[] hist, long total, double p) {
+        long want = (long) Math.ceil(p * total), seen = 0;
+        for (int v = 0; v < hist.length; v++) {
+            seen += hist[v];
+            if (seen >= want) {
+                return v;
+            }
+        }
+        return hist.length - 1;
+    }
+
+    /** The pose, and the small neighbourhood around it the landmarks cannot resolve. */
     private static List<ViewMapping> nudges(ViewMapping read) {
         List<ViewMapping> out = new ArrayList<>();
         for (int dx = -NUDGE; dx <= NUDGE; dx += NUDGE_STEP) {
