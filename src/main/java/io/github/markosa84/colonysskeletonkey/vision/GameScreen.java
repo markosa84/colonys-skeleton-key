@@ -75,12 +75,28 @@ public final class GameScreen {
     }
 
     GameScreen(ScreenGrabber grabber, Viewport viewport, Tone tone) {
+        this(grabber, viewport, viewport.mapping(), tone);
+    }
+
+    /**
+     * With the boxes taken from an explicit mapping rather than from the viewport's own. The
+     * viewport still says <b>where the view is</b> - its origin translates every grab onto the
+     * desktop, and its size is the canvas - but where the <b>lock</b> is within that view is the
+     * mapping's business, and the two can disagree: a measured window rectangle is a guess, and one
+     * solved from the lock's own lattice is not.
+     *
+     * <p>The mapping is taken once, here, so the lock grab, the picks grab and the canvas can never
+     * be built from different ones. That is not a style point - the reader's coordinates, the region
+     * the grab covers and the canvas it is composited onto have to agree to the pixel or the frame
+     * the reader gets is stale where it matters.
+     */
+    GameScreen(ScreenGrabber grabber, Viewport viewport, ViewMapping mapping, Tone tone) {
         this.grabber = grabber;
         this.viewport = viewport;
         this.tone = tone;
-        this.lockBox = lockBox(viewport);
+        this.lockBox = lockBox(mapping);
         this.lockGrab = onScreen(lockBox, viewport);
-        this.picksGrab = onScreen(picksBox(viewport), viewport);
+        this.picksGrab = onScreen(picksBox(mapping), viewport);
     }
 
     /** The viewport this screen captures - the game's view, not necessarily the whole display. */
@@ -90,18 +106,26 @@ public final class GameScreen {
 
     /** The lock capture box for a viewport; exposed so {@code CaptureBoxTest} can prove containment. */
     static Rectangle lockBox(Viewport vp) {
-        return box(vp, LOCK_X0, LOCK_Y0, LOCK_W, LOCK_H);
+        return lockBox(vp.mapping());
+    }
+
+    static Rectangle lockBox(ViewMapping mapping) {
+        return box(mapping, LOCK_X0, LOCK_Y0, LOCK_W, LOCK_H);
     }
 
     /** The lockpick counter's box: the break detector's evidence, and {@link Tone}'s gamma probe. */
     static Rectangle picksBox(Viewport vp) {
-        return box(vp, PICKS_X0, PICKS_Y0, PICKS_W, PICKS_H);
+        return picksBox(vp.mapping());
+    }
+
+    static Rectangle picksBox(ViewMapping mapping) {
+        return box(mapping, PICKS_X0, PICKS_Y0, PICKS_W, PICKS_H);
     }
 
     /** Maps a reference box into the view: origin floored, extent ceiled, so nothing is cut. */
-    private static Rectangle box(Viewport vp, int x, int y, int w, int h) {
-        return new Rectangle((int) Math.floor(vp.x(x)), (int) Math.floor(vp.y(y)),
-                (int) Math.ceil(vp.len(w)), (int) Math.ceil(vp.len(h)));
+    private static Rectangle box(ViewMapping m, int x, int y, int w, int h) {
+        return new Rectangle((int) Math.floor(m.x(x)), (int) Math.floor(m.y(y)),
+                (int) Math.ceil(m.len(w)), (int) Math.ceil(m.len(h)));
     }
 
     /**

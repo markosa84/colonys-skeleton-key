@@ -32,6 +32,7 @@ import io.github.markosa84.colonysskeletonkey.vision.LivePoller;
 import io.github.markosa84.colonysskeletonkey.vision.LockAnalyzer;
 import io.github.markosa84.colonysskeletonkey.vision.LockReader;
 import io.github.markosa84.colonysskeletonkey.vision.Tone;
+import io.github.markosa84.colonysskeletonkey.vision.ViewMapping;
 import io.github.markosa84.colonysskeletonkey.vision.Viewport;
 import io.github.markosa84.colonysskeletonkey.win32.Win32;
 
@@ -317,9 +318,14 @@ public final class AutoLockpick {
      * legacy one always.
      */
     static LockAnalyzer analyzer(String kind, Viewport viewport, Tone tone) {
+        return analyzer(kind, viewport.mapping(), tone);
+    }
+
+    /** The same, against the mapping the reader should use - which need not be the viewport's own. */
+    static LockAnalyzer analyzer(String kind, ViewMapping mapping, Tone tone) {
         return "legacy".equals(kind)
-                ? new LockReader(viewport, tone)
-                : new LatticeReader(viewport, tone);
+                ? new LockReader(mapping, tone)
+                : new LatticeReader(mapping, tone);
     }
 
     /** True when {@code --dump} asks for frames instead of a solve. */

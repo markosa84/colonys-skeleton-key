@@ -54,6 +54,18 @@ public record Viewport(int originX, int originY, int width, int height) {
         }
     }
 
+    /**
+     * The aspect-fit above, as the plain affine map it reduces to - which is all any reader needs.
+     * Deriving it here keeps the aspect-fit reasoning in the one class that knows about screens, and
+     * lets a reader be pointed at a mapping that did <b>not</b> come from a measured window.
+     */
+    public ViewMapping mapping() {
+        double scale = scale();
+        return new ViewMapping(scale,
+                width / 2.0 - REFERENCE.width() / 2.0 * scale,
+                height / 2.0 - REFERENCE.height() / 2.0 * scale);
+    }
+
     /** Uniform scale from reference pixels: the side the 16:9 view is fitted by sets it. */
     public double scale() {
         return Math.min(width / (double) REFERENCE.width(),
@@ -62,12 +74,12 @@ public record Viewport(int originX, int originY, int width, int height) {
 
     /** A reference x-position mapped into this view, anchored to its centre. View-local. */
     public double x(double refX) {
-        return width / 2.0 + (refX - REFERENCE.width() / 2.0) * scale();
+        return mapping().x(refX);
     }
 
     /** A reference y-position mapped into this view, anchored to its centre. View-local. */
     public double y(double refY) {
-        return height / 2.0 + (refY - REFERENCE.height() / 2.0) * scale();
+        return mapping().y(refY);
     }
 
     /** A reference length, distance or offset mapped onto this view. */

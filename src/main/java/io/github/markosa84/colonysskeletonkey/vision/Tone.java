@@ -121,7 +121,16 @@ public final class Tone {
      * <b>viewport</b> is wrong, the other way this tool has failed in the field.
      */
     public static Tone estimate(BufferedImage frame, Viewport viewport) {
-        int[] histogram = panel(frame, GameScreen.picksBox(viewport));
+        return estimate(frame, viewport.mapping());
+    }
+
+    /**
+     * The same, against a mapping - which is what a corrected one must be re-estimated through. The
+     * probe is a box at a fixed <i>reference</i> position, so a mapping that moves the lock moves the
+     * panel with it; reading the gamma through the old one would probe whatever now sits there.
+     */
+    public static Tone estimate(BufferedImage frame, ViewMapping mapping) {
+        int[] histogram = panel(frame, GameScreen.picksBox(mapping));
         if (histogram == null) {
             return UNREADABLE;
         }
