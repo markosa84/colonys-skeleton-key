@@ -83,12 +83,15 @@ public final class FanLocator {
     /**
      * The rule's length in reference px, <b>as this detector reads it</b> - not as a person reads it
      * off the screen, which is 695. The ridge runs a little past each end, where the rule tapers
-     * into the background, and it does so by the same amount every time: measured 708-712 over the
-     * whole corpus and both reporters' HDR dumps. Calibrating the constant to the detector rather
-     * than to the eye is worth 2.3% of scale, which is the difference between the reader reading the
-     * lock at the pose and not.
+     * into the background, and it does so by about the same amount every time: measured 692-716
+     * across the whole corpus and both reporters' HDR dumps, so this is their middle. Calibrating
+     * the constant to the detector rather than to the eye is worth 2.3% of scale.
+     *
+     * <p>It matters less than it once did, and that is the point of having two landmarks: the scale
+     * finally used comes from {@link #BASELINE}, and this now only has to be good enough to find the
+     * panel and to be an honest second opinion on it ({@link #SCALE_AGREE}).
      */
-    private static final double RULE_LEN = 710.0;
+    private static final double RULE_LEN = 703.0;
 
     // --- The lockpick counter's white panel, measured. The rule finds the HUD; this places it.
 
@@ -320,15 +323,77 @@ public final class FanLocator {
      * coordinates: the rule is one of these, and so is every beam in the room.
      */
     List<double[]> rules(Plane p) {
-        List<double[]> out = new ArrayList<>();
+        List<double[]> rows = new ArrayList<>();
         for (int y = RIDGE_REACH; y < p.h - RIDGE_REACH; y++) {
-            List<double[]> runs = merge(runs(p, y));
-            for (double[] run : runs) {
-                out.add(new double[] {y, run[0], run[1]});
+            for (double[] run : merge(runs(p, y))) {
+                rows.add(new double[] {y, run[0], run[1]});
             }
         }
+        List<double[]> out = lines(rows);
         out.sort(Comparator.comparingDouble(a -> a[1] - a[2])); // longest first
         return out.subList(0, Math.min(MAX_CANDIDATES, out.size()));
+    }
+
+    /**
+     * One candidate per <b>line</b>, rather than one per row - and of a line's rows, the one through
+     * its <b>middle</b>.
+     *
+     * <p>The rule is a thick line: three worked rows at 4K, and each has its own run, its own length
+     * and its own centre. Emitting all three and preferring the longest picks the worst of them
+     * every time, for a reason worth stating plainly - <b>a row can only get longer by being
+     * wrong</b>. The rule's true ends are where the ridge stops, and the room's faint ridges beyond
+     * them can only add. Measured on {@code 6p-plates-0-and-5/step-12}, one rule reads
+     * <pre>
+     *   row 96: centre 3113.5, length 741
+     *   row 97: centre 3089.5, length 699   &lt;- the truth is 3089.5 and ~700
+     *   row 98: centre 3104.5, length 759   &lt;- and this is the one "longest" chose
+     * </pre>
+     * which was the last misread in the corpus: a 7% scale error, out of the row that bled furthest
+     * into the room.
+     *
+     * <p>The middle row, not the shortest. "Shortest is cleanest" is the tempting rule and it is
+     * <b>half true</b>: contamination only lengthens, so the shortest row is never contaminated -
+     * but a row is also short when its ridge <i>split</i> and the pieces did not {@link #MERGE}, and
+     * a split row is worse than a contaminated one. Measured, choosing the shortest reads every rule
+     * in the corpus accurately and then <i>refuses</i> 25 frames it used to find, almost all of them
+     * at aspects other than 16:9, where the rule is thin enough to break. The middle row cannot be
+     * either of those things: a line's centre is where the line is.
+     *
+     * <p>Rows belong to the same line when their runs overlap by more than half of <b>each</b> of
+     * them - which keeps a stray 8px ridge from joining a 115px rule while letting the rule's own
+     * rows find each other.
+     */
+    private static List<double[]> lines(List<double[]> rows) {
+        List<double[]> out = new ArrayList<>();
+        boolean[] taken = new boolean[rows.size()];
+        for (int i = 0; i < rows.size(); i++) {
+            if (taken[i]) {
+                continue;
+            }
+            taken[i] = true;
+            List<double[]> line = new ArrayList<>();
+            line.add(rows.get(i));
+            for (int j = i + 1; j < rows.size(); j++) {
+                if (rows.get(j)[0] > line.getLast()[0] + 1) {
+                    break; // rows arrive in ascending order, so nothing further can be adjacent
+                }
+                if (!taken[j] && sameLine(line.getLast(), rows.get(j))) {
+                    taken[j] = true;
+                    line.add(rows.get(j));
+                }
+            }
+            out.add(line.get(line.size() / 2));
+        }
+        return out;
+    }
+
+    /** True when two rows' runs are the same line seen one row apart. */
+    private static boolean sameLine(double[] a, double[] b) {
+        if (Math.abs(a[0] - b[0]) > 1) {
+            return false;
+        }
+        double overlap = Math.min(a[2], b[2]) - Math.max(a[1], b[1]);
+        return overlap > 0.5 * (a[2] - a[1]) && overlap > 0.5 * (b[2] - b[1]);
     }
 
     /** Every maximal ridge run on one row, as {@code {lo, hi}}, left to right. */
