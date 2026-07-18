@@ -13,8 +13,9 @@
   `check`/`build`) replays every labelled frame in `src/test/data/frames/` through **both**
   `LockReaderTest` and `LatticeReaderTest` and must stay green on **every one** (the 4K calibration
   census, the `6p-gap-shadow` regression frame, the 7-plate census, the 161-frame resolution sweep,
-  and the gamma corpus). `LatticeReaderTest` also pins whole-corpus safety invariants: never a wrong
-  plate count, never a false pop, offsets always in range. To debug offline,
+  and the gamma corpus). `LatticeReaderTest` additionally reads the labelled `hdr/` corpus `LockReader`
+  refuses (HDR is not an invertible LUT — see CLAUDE.md's dead ends), and pins whole-corpus safety
+  invariants: never a wrong plate count, never a false pop, offsets always in range. To debug offline,
   `new LatticeReader(Viewport.REFERENCE)` (or `LockReader`) is safe anywhere: pure image analysis
   (all Robot captures live in `GameScreen`), so feed `ImageIO.read(...)` images straight into
   `detectPlateCount` / `readCentered` / `readState`. `LatticeReader`'s constants are **ratios** (edit

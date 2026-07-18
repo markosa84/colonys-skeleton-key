@@ -1,0 +1,47 @@
+# HDR tonemapping, against the 7-plate difficulty-4 chest - the same chest and the same key protocol
+# as the gamma slider (../gamma), captured with the game's HDR mode ON. Three players have now
+# reported the tool reading nothing over an HDR screenshot that looks perfectly normal; these are the
+# first labelled HDR frames, and they exist to pin that the tone-free reader is unmoved by it.
+#
+# WHY HDR IS NOT THE GAMMA SLIDER. The slider (../gamma) is a per-pixel LUT on the final frame, so it
+# is invertible: vision/Tone measures it off the panel and undoes it, and even the absolute-gate
+# LockReader then reads as if calibrated. HDR is not invertible. Turning it on renders the scene
+# through a different tonemap, and the SDR capture of that is LOSSY exactly where SDR clips. Measured
+# against the matched HDR-off twins (archived at C:\dev\frames-archive\hdr\off), SDR level 255 maps to
+# HDR 153..234 - a 55-level fan-out - because the panel white, the brass highlights and the torch
+# flames all saturate to 255 in SDR but sit at different real brightnesses that HDR keeps. There is no
+# function HDR->SDR that recovers the calibrated look; the information is gone. So HDR CANNOT join
+# Tone's family, and it does not need to: LatticeReader reads from the lock's own contrast and never
+# wanted the absolute levels in the first place.
+#
+# THE PANEL, as vision/Tone reads it here: ink 37, white 199 - the reporter's own numbers, and OFF the
+# gamma family (which puts white ~255 beside ink 37). So Tone.isOffFamily() fires; LatticeReader takes
+# its tone-free path and reads every frame; and LockReader - which trusts the tone, and whose nearest
+# curve crushes the brass below isPin - correctly REFUSES (-1) rather than reading a wrong lock. Both
+# behaviours are pinned: HdrCorpusTest asserts the off-family panel and the refusal, LatticeReaderTest
+# asserts the reads, and AnalyzerContractTest holds both readers to "never a wrong plate count, never a
+# false pop" over these frames too.
+#
+# THE PROTOCOL is the gamma corpus's, so the labels are the same and transfer the same way - game state
+# depends on the keys sent, not on the pixels that come back:
+#
+#   protocol: R, then W x6 (clamps the cursor to plate 0), then S x2 (selects plate 2).
+#             One dump, then six more, one after each A.
+#
+# The chest's START is {0,-2,-3,3,3,2,3} and plate 2 drags nothing, so it sweeps its own track alone
+# from -3 to +3 and nothing else on the lock moves. No move can strain: not one lockpick was spent.
+#
+#   step-k = [0, -2, k-3, 3, 3, 2, 3]
+#
+# Captured 2026-07-18 with `lockpick.bat --dump` (F8 photographs the view and does nothing else) at
+# 3840x2160, HDR toggled in the game's Settings -> Display. Full-size originals - both these HDR frames
+# and their HDR-off twins - are archived off-repo (C:\dev\frames-archive\hdr); these are the shrunk
+# copies. See ../README.md.
+
+step-0.png = [0, -2, -3, 3, 3, 2, 3]
+step-1.png = [0, -2, -2, 3, 3, 2, 3]
+step-2.png = [0, -2, -1, 3, 3, 2, 3]
+step-3.png = [0, -2,  0, 3, 3, 2, 3]
+step-4.png = [0, -2,  1, 3, 3, 2, 3]
+step-5.png = [0, -2,  2, 3, 3, 2, 3]
+step-6.png = [0, -2,  3, 3, 3, 2, 3]

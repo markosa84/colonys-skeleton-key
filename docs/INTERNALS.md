@@ -112,8 +112,10 @@ nothing is guessed. And when the panel is not where it should be, the tool says 
 nothing, rather than inventing a correction.
 
 The one thing it will tell you about is a picture *darker than the gamma slider alone can make it* —
-that means a second setting is dimming things (the game's brightness offset, HDR, a display profile),
-and the correction may not be enough. It says so in the `.txt` beside the dump.
+most often **HDR**. Gamma correction cannot describe that, so the tool does not lean on it there: it
+reads the lock from its own light and shadow — how much darker a hole is than the plate around it —
+which needs no brightness reference at all, and so an HDR screenshot reads too. It still says so in
+the `.txt` beside the dump, and it will never trust a correction it can see does not fit.
 
 ### When it says "No 4-7 plate lock detected"
 

@@ -44,7 +44,8 @@ goes in one of the first three.
 & .\gradlew.bat build --console=plain
 
 # Just the tests (~30s; includes the 34-frame calibration gate, the live-failure regression
-# frames, the 21-frame 7-plate census and the 161-frame resolution sweep; no game, no display)
+# frames, the 21-frame 7-plate census, the 161-frame resolution sweep and the 7-frame HDR corpus;
+# no game, no display)
 & .\gradlew.bat test --console=plain
 
 # One class, or one method (a @ParameterizedTest matches by METHOD name, not by its "seed 0"
@@ -85,7 +86,8 @@ goes in one of the first three.
   dependency and test-scoped — the app itself has none; JaCoCo is a build plugin, not a dependency).
   `LockReaderTest` must stay green on
   **every** frame — the 34-frame census, the `6p-gap-shadow` regression frame, the 21-frame `7p-*`
-  census, the 161-frame resolution sweep and the 27-frame `gamma` corpus: every `LockReader` constant
+  census, the 161-frame resolution sweep, the 27-frame `gamma` corpus and the 7-frame `hdr` corpus:
+  every `LockReader` constant
   is fitted to the frames under `src/test/data/frames/`. Those PNGs are deliberately **not classpath resources** (the whole corpus
   would be copied into `build/` every clean build); the test task passes their absolute path as
   `-Dlockpick.frames.dir` and declares them a task input, with a relative fallback for runners
@@ -121,7 +123,7 @@ goes in one of the first three.
   script and the second working copy are gone. Consequences that still bind: **anything that needs a
   frame goes through `TestFrames`**, and the frame-driven classes **fail** rather than skip when the
   frames are missing — a skip would switch the reader's entire calibration off and still report a
-  green suite. CI therefore runs the real 244-frame gate, which is this project's only verification
+  green suite. CI therefore runs the real 251-frame gate, which is this project's only verification
   on a machine that is not the author's.
 - Toolchain is pinned to Java 25 with `auto-download=false`; the daemon runs on JDK 25 and resolves
   the current JVM, so no toolchain fetch. (Dependency resolution for JUnit did need the network
@@ -166,8 +168,8 @@ connections and the game's real strain/break/reset rules.
     `luminance<105`, pop `area>=250`) fitted at one gamma; `LatticeReader` asks only **ratios of the
     lock's own contrast** (a hole is "much darker than the plate it is cut into", the plate measured
     per-row off the frame), so it holds at any gamma, in **HDR**, and at any resolution. It matches
-    `LockReader` on all 190 labelled frames (1005/1005 offsets) *and* reads the HDR dumps
-    `LockReader` returns −1 on. It still uses `Tone`, but **only on-family** (a real gamma setting):
+    `LockReader` on all 190 labelled frames (1005/1005 offsets) *and* reads the labelled `hdr/` corpus
+    `LockReader` returns −1 on (7 frames, `HdrCorpusTest`). It still uses `Tone`, but **only on-family** (a real gamma setting):
     off-family (HDR, `Tone.isOffFamily()`) it ignores the curve — which cannot express HDR — and
     reads raw. Two design rules it took a while to get right, both pinned by `LatticeReaderTest`:
     the **tracing** gate ("plate or not?") is per-plate-local, the **void** gate ("how black shows
@@ -549,10 +551,11 @@ census, the `6p-gap-shadow` regression frame (a live failure dump whose labels t
 marking every hole), the **4K 7-plate census** (`7p-*`), the 161-frame resolution sweep (23 display
 modes × 7 states), and the **27-frame `gamma` corpus** (the game's slider end to end — see below).
 `LatticeReader` matches `LockReader` frame-for-frame (190/190 plate counts, 1005/1005 offsets) and
-additionally reads HDR dumps `LockReader` returns −1 on; `LatticeReaderTest` also pins the
+additionally reads the labelled **7-frame `hdr/` corpus** `LockReader` refuses (−1) — the first
+labelled HDR frames, pinned by `HdrCorpusTest` (see below); `LatticeReaderTest` also pins the
 whole-corpus safety invariants (never a wrong plate count, never a false pop, offsets in range).
 `CaptureBoxTest` proves the capture box contains everything the reader samples — any plate count, any
-offsets, any viewport — with a safety belt. The full suite is **~1750 tests** across
+offsets, any viewport — with a safety belt. The full suite is **~2650 tests** across
 solver/vision/control/session and the root, and **every class outside `win32` is covered** (94.5%
 line / 90.6% branch, gated at 94/90 — see "Testing seams" below).
 
@@ -648,26 +651,18 @@ Full numbers, method and spread are in `docs/INTERNALS.md` "Measured timings". T
 
 Remaining:
 
-- **The frame darker than the gamma slider can make it is HDR, and the tone does not yet handle it.**
-  Three reporters now, all off the family: **ink 13/white 184**, **11/183**, **21/189**, **36/199**,
-  where the family says ~254 at those inks. Not `m_ColorBrightnessOffset` — two dumps at its extremes
-  came back **byte-identical** to the baseline, so it never reaches the frame. The evidence says the
-  capture is **HDR-tonemapped**:
-  - the pick-counter panel is **opaque** — its white plateau is flat (sd 0.4–4.4, the same as ours), so
-    the probe is sound and the picture really is being compressed, not the panel showing the room;
-  - diffuse white (that panel, which should be 255) lands at **183–199**, ~72–78%, exactly where an
-    SDR-mapped HDR reference white sits;
-  - and the **highlights are crushed**: the pin box holds **17–21%** of pixels above luminance 230 in
-    our fixtures and **0.2–0.5%** in theirs, a 30–100× drop, while single brass pixels still reach
-    r=255. Scaled-down SDR cannot do that; a tonemap with headroom above white can.
-
-  `Tone`'s family is **1-D (gamma only)**, so it mis-indexes these frames and applies a curve that is
-  **worse than nothing**: on the cold-room frame the raw pixels yield 3–4 detectable pins and the
-  corrected ones yield **zero** (the curve is steepest in the midtones, so it lifts the brass's blue
-  past its already-clipped red and the pixel stops being warm). Until it is fixed the reader correctly
-  reports *nothing* on these frames rather than a wrong lock. **The fix needs a measured curve**, from
-  matched HDR-on/HDR-off pairs on the dev machine — the same method that produced `Tone.FAMILY`, and
-  the *only* method: see the extrapolation dead end.
+- **HDR is handled by the default reader, and now pinned by a labelled corpus.** An HDR-tonemapped
+  capture is **off `Tone`'s gamma family** (panel ink 37 / white 199 — a reporter's own numbers —
+  where the family expects ~255), so `LatticeReader` ignores the untrustworthy curve and reads it
+  **tone-free**, correctly; `LockReader`, which trusts the tone, **abstains (−1)** rather than reading
+  a wrong lock. Both are pinned by the **7-frame `hdr/` corpus** (captured 2026-07-18 — see
+  `HdrCorpusTest`, `LatticeReaderTest.readsTheHdrCorpus`, and `AnalyzerContractTest`, which now folds
+  it into the whole-corpus safety contract). This was the failure mode three players reported; it now
+  has fixtures. The matched HDR-on/HDR-off capture that produced it also **retired the "measure a
+  curve" plan** — see the new dead end: HDR is not invertible, so there is no curve to measure.
+  Caveats: **one HDR configuration** is measured — one display's tonemap, gamma 2.7, 4K, the 7-plate
+  chest — so a very different HDR setup is unproven, though the tone-free path has no absolute constant
+  left to break.
 - **Non-4K resolutions are sweep-validated, with caveats.** A live front-plate sweep of one
   5-plate lock reads exactly right at all 23 dev-machine display modes (800×600..4K, spanning
   16:9/16:10/4:3/5:4) — pinned by `LockReaderTest`'s 161 sweep fixtures. Caveats: one lock, one
@@ -728,6 +723,18 @@ centered** (it does not slide with the offset).
   frame had **7** — *worse than doing nothing*. Two closely-spaced dark anchors say nothing about the
   far end of the range. `Tone`'s curves are therefore **measured at every level** from matched frame
   pairs, and it **clamps** rather than extrapolates past the ends of the slider.
+- **HDR is not an invertible per-pixel LUT, so it cannot join `Tone`'s family — measured, not
+  assumed.** The gamma slider is a LUT on the final frame, so a LUT undoes it. HDR is a different
+  render: the SDR capture of an HDR desktop **clips where HDR does not**, and the clip is lossy.
+  Measured on **7 matched HDR-on/HDR-off pairs** (`src/test/data/frames/hdr/`, and their full-size
+  twins archived at `C:\dev\frames-archive\hdr`): SDR level **255 maps to HDR 153..234** — a 55-level
+  fan-out, because the panel white, the brass highlights and the torch flames all saturate to 255 in
+  SDR but sit at different real brightnesses HDR keeps. There is **no function HDR→SDR** that recovers
+  the calibrated look; the information is gone. So don't try to build a curve — there isn't one, and
+  the "measure it like `Tone.FAMILY`" plan is retired. HDR is instead read **tone-free** by
+  `LatticeReader` (it never wanted absolute levels), which is what the `hdr/` corpus pins; `LockReader`
+  correctly refuses it. The 1-D gamma family still **flags** such a frame (`isOffFamily`) so the reader
+  takes the tone-free path — the family's job on HDR is to notice it, not to undo it.
 - **A smaller fan is not a smaller lock — and only the HOLE ROWS can tell you so.** Plate `i` of `n`
   sits at `(mid − i)` depth steps with `mid = (n−1)/2`, so the fans of `n` and `n+2` **share a
   lattice**: a 6-plate lock's pins (`±2.5, ±1.5, ±0.5`) *always* cover a 4-plate fan (`±1.5, ±0.5`),
