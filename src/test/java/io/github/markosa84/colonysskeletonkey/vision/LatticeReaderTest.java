@@ -20,8 +20,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * Regression tests for {@link LatticeReader}, the tone-free reader that is now the default. It reads
  * the lock from the lock's <b>own contrast</b> rather than from absolute pixel values, and it matches
  * the pixel-calibrated {@link LockReader} on <b>every</b> labelled frame in {@code src/test/data/frames/}
- * - the 53-frame 4K census, the whole gamma slider (1.2..3.2), and the 161-frame resolution sweep across
- * all 23 dev-machine display modes (800x600..4K) - and additionally reads the labelled <b>HDR</b> corpus
+ * - the 53-frame 4K census, the whole gamma slider (1.2..3.2), and the 133-frame resolution sweep across
+ * all 19 dev-machine display modes (1280x720..4K) - and additionally reads the labelled <b>HDR</b> corpus
  * ({@code hdr/}), where the calibrated reader returns nothing: an HDR tonemap is off the gamma family,
  * so {@link LockReader} refuses (-1) while this one reads every frame from the lock's own contrast.
  *
@@ -85,7 +85,7 @@ class LatticeReaderTest {
         assertArrayEquals(expected, reader.readState(img, expected.length), frame + ": offsets");
     }
 
-    /** The front-plate sweep at every one of the 23 display modes, 800x600 through 4K. */
+    /** The front-plate sweep at every one of the 19 display modes, 1280x720 through 4K. */
     @ParameterizedTest(name = "{0}")
     @MethodSource("sweepFrames")
     void readsTheFrontPlateSweepAtEveryResolution(String frame, Viewport viewport, int[] expected) {

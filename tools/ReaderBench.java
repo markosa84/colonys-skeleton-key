@@ -201,7 +201,7 @@ public final class ReaderBench {
             out.add(new Shot(FRAMES + "gamma/g-" + g + ".png", chest(0)));
         }
 
-        // The resolution sweep: one 5-plate lock, all 23 display modes, front plate swept.
+        // The resolution sweep: one 5-plate lock, all 19 display modes, front plate swept.
         for (String mode : SWEEP_MODES) {
             for (int k = 0; k < 7; k++) {
                 out.add(new Shot(FRAMES + mode + "/front-plate-sweep/step-" + k + ".png",
@@ -215,7 +215,7 @@ public final class ReaderBench {
         "3840x2160", "2560x1600", "2560x1440", "2048x1536", "1920x1440", "1920x1200",
         "1920x1080", "1680x1050", "1600x1200", "1600x1024", "1600x900", "1440x1080",
         "1366x768", "1360x768", "1280x1024", "1280x960", "1280x800", "1280x768",
-        "1280x720", "1176x664", "1152x864", "1024x768", "800x600",
+        "1280x720",
     };
 
     static int[] chest(int k) {

@@ -17,8 +17,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * Regression tests for {@link LockReader} against every labelled screenshot in
  * {@code src/test/data/frames/}: the 53-frame calibration census (4K), regression frames from
- * live failures, the gamma slider end to end, plus a 161-frame live sweep of one 5-plate lock at
- * all 23 display modes of the dev machine (800x600 through 4K), which pins the {@link Viewport}
+ * live failures, the gamma slider end to end, plus a 133-frame live sweep of one 5-plate lock at
+ * all 19 display modes of the dev machine (1280x720 through 4K), which pins the {@link Viewport}
  * scaling against real renders. Every constant in the reader is fitted to the 4K frames, so any
  * tweak to them must keep this suite green.
  *

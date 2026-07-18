@@ -38,8 +38,8 @@ public final class PinPixels {
                 new Shot(F + "gamma/g-3.2/step-0.png", 7, chest(0), "gamma 3.2 (brightest)"),
                 new Shot(F + "3840x2160/front-plate-sweep/step-3.png", 5,
                         new int[] {3, 1, 2, 0, 0}, "5-plate, 4K, plates 3+4 popped"),
-                new Shot(F + "800x600/front-plate-sweep/step-3.png", 5,
-                        new int[] {3, 1, 2, 0, 0}, "5-plate, 800x600"),
+                new Shot(F + "1280x720/front-plate-sweep/step-3.png", 5,
+                        new int[] {3, 1, 2, 0, 0}, "5-plate, 1280x720 (floor)"),
                 new Shot("captures/1/no-lock-20260713-151812-209.png", 5, null, "HDR 2560x1440"),
                 new Shot("captures/2/no-lock-20260714-010246-975.png", 5, null, "HDR 1920x1080"));
 

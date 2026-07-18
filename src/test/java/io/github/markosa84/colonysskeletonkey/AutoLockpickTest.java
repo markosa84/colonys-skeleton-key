@@ -314,6 +314,22 @@ class AutoLockpickTest {
                 Optional.of(new Win32.Rect(100, 100, 300, 200)), display), "a splash, not a game");
     }
 
+    /**
+     * Below the read floor the lock renders too small - a centred plate's raised pin merges with a
+     * hole and the walk drops to 5/6 - so the tool refuses to solve rather than miscount silently. The
+     * floor is an aspect-fit scale (1280x720 is 1/3 of 4K), so it tracks the rendered lock rather than
+     * the frame's width: 1280x720 is in, the four dropped sweep modes are out.
+     */
+    @Test
+    void aViewSmallerThanTheReadFloorIsRefused() {
+        assertFalse(AutoLockpick.tooSmall(new Viewport(1280, 720)), "1280x720 is the floor, supported");
+        assertFalse(AutoLockpick.tooSmall(new Viewport(1280, 1024)));
+        assertFalse(AutoLockpick.tooSmall(Viewport.REFERENCE), "4K is comfortably supported");
+        assertTrue(AutoLockpick.tooSmall(new Viewport(1176, 664)), "the largest dropped mode");
+        assertTrue(AutoLockpick.tooSmall(new Viewport(1024, 768)));
+        assertTrue(AutoLockpick.tooSmall(new Viewport(800, 600)));
+    }
+
     // -- the DPI self-check ------------------------------------------------------------------------
 
     /**

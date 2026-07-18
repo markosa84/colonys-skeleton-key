@@ -77,6 +77,15 @@ public final class AutoLockpick {
      */
     private static final int MIN_GAME_WIDTH = 640, MIN_GAME_HEIGHT = 480;
 
+    /**
+     * The reliable-read floor, as an aspect-fit scale ({@code min(w/3840, h/2160)}): below the
+     * 1280x720 view (scale 1/3) the lock renders too small to read - a centred plate's raised pin
+     * merges with a neighbouring hole and the hole walk drops to 5/6. Measured: at 1280x720 and up
+     * every plate walks 6/6; the four modes below it (800x600 .. 1176x664) fell short. The tool
+     * refuses to solve below the floor rather than miscount a lock silently.
+     */
+    private static final double MIN_SCALE = 1.0 / 3.0;
+
     public static void main(String[] args) throws Exception {
         String readerKind = resolveReader(args);
         Optional<Path> frame = diagnoseArg(args);
@@ -129,6 +138,10 @@ public final class AutoLockpick {
                         () -> environment(gameProcess, dpi));
                 if (dumping) {
                     dump(Win32::foregroundProcessName, gameProcess, view);
+                } else if (tooSmall(viewport)) {
+                    System.out.println("The lock renders too small to read reliably at "
+                            + viewport.width() + "x" + viewport.height() + ". This tool needs at "
+                            + "least a 1280x720 view - raise the game's resolution and press F8 again.");
                 } else {
                     Path logFile = Path.of("captures",
                             "f8-" + LocalDateTime.now().format(LOG_STAMP) + ".log");
@@ -162,6 +175,14 @@ public final class AutoLockpick {
                 .filter(r -> r.width() >= MIN_GAME_WIDTH && r.height() >= MIN_GAME_HEIGHT)
                 .map(r -> new Viewport(r.x(), r.y(), r.width(), r.height()))
                 .orElseGet(() -> new Viewport(display.width, display.height));
+    }
+
+    /**
+     * Below the reliable-read floor (see {@link #MIN_SCALE}). The small tolerance keeps a viewport
+     * that computes to exactly the 1280x720 scale on the supported side of the line.
+     */
+    static boolean tooSmall(Viewport viewport) {
+        return viewport.scale() < MIN_SCALE - 1e-6;
     }
 
     /**
