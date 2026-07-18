@@ -8,7 +8,7 @@ import java.awt.image.BufferedImage;
 import io.github.markosa84.colonysskeletonkey.solver.LockModel;
 
 /**
- * Where the lock is, mapped onto one {@link Viewport}. The <b>measured</b> half of reading a lock,
+ * Where the lock is, mapped onto one {@link ViewMapping}. The <b>measured</b> half of reading a lock,
  * and the half that has never had to change: it survives four rooms, both ends of the game's gamma
  * slider, 23 display modes from 800x600 to 4K, and an HDR tonemap that defeats every colour constant
  * in the vision layer. Every reader shares this class, so the numbers live in exactly one place.
@@ -92,9 +92,9 @@ public final class FanGeometry {
     /** Dark holes per plate: the 7 holes minus the one the pin occupies. */
     public static final int HOLES_PER_PLATE = 2 * LockModel.MAX_OFFSET;
 
-    // --- The same quantities, mapped onto the actual viewport.
+    // --- The same quantities, mapped onto the actual view.
 
-    private final Viewport viewport;
+    private final ViewMapping mapping;
     final double fanCenterX, fanCenterY;
     final double depthStepX, depthStepY;
     final int rx0, ry0, rx1, ry1;
@@ -103,33 +103,44 @@ public final class FanGeometry {
     final double stepMin, stepMax, stepIdeal;
     final double holeMinW, holeMaxW, holeMinH, holeMaxH;
 
+    /** The fan as it lands in a game view of this size - the measured way to know where the lock is. */
     public FanGeometry(Viewport viewport) {
-        this.viewport = viewport;
-        fanCenterX = viewport.x(FAN_CENTER_X);
-        fanCenterY = viewport.y(FAN_CENTER_Y);
-        depthStepX = viewport.len(DEPTH_STEP_X);
-        depthStepY = viewport.len(DEPTH_STEP_Y);
-        rx0 = (int) Math.round(viewport.x(RX0));
-        ry0 = (int) Math.round(viewport.y(RY0));
-        rx1 = (int) Math.round(viewport.x(RX1));
-        ry1 = (int) Math.round(viewport.y(RY1));
-        // Floored at 4px: the effective gate the old flat 20px bound already had at 800x600, so
-        // blob-centroid noise at tiny resolutions keeps the room it has always had.
-        rowMaxDy = Math.max(4, (int) Math.round(viewport.len(ROW_MAX_DY)));
-        rowMaxDx = (int) Math.round(viewport.len(ROW_MAX_DX));
-        cropPadX = (int) Math.round(viewport.len(CROP_PAD_X));
-        cropPadY = (int) Math.round(viewport.len(CROP_PAD_Y));
-        stepMin = viewport.len(STEP_MIN);
-        stepMax = viewport.len(STEP_MAX);
-        stepIdeal = viewport.len(STEP_IDEAL);
-        holeMinW = viewport.len(HOLE_MIN_W);
-        holeMaxW = viewport.len(HOLE_MAX_W);
-        holeMinH = viewport.len(HOLE_MIN_H);
-        holeMaxH = viewport.len(HOLE_MAX_H);
+        this(viewport.mapping());
     }
 
-    public Viewport viewport() {
-        return viewport;
+    /**
+     * The fan under an arbitrary mapping - including one that was solved for from the lock's own
+     * lattice rather than derived from a measured window rectangle. There is no window in a mapping,
+     * and this class never needed one: it only ever asked the viewport where things land.
+     */
+    public FanGeometry(ViewMapping mapping) {
+        this.mapping = mapping;
+        fanCenterX = mapping.x(FAN_CENTER_X);
+        fanCenterY = mapping.y(FAN_CENTER_Y);
+        depthStepX = mapping.len(DEPTH_STEP_X);
+        depthStepY = mapping.len(DEPTH_STEP_Y);
+        rx0 = (int) Math.round(mapping.x(RX0));
+        ry0 = (int) Math.round(mapping.y(RY0));
+        rx1 = (int) Math.round(mapping.x(RX1));
+        ry1 = (int) Math.round(mapping.y(RY1));
+        // Floored at 4px: the effective gate the old flat 20px bound already had at 800x600, so
+        // blob-centroid noise at tiny resolutions keeps the room it has always had.
+        rowMaxDy = Math.max(4, (int) Math.round(mapping.len(ROW_MAX_DY)));
+        rowMaxDx = (int) Math.round(mapping.len(ROW_MAX_DX));
+        cropPadX = (int) Math.round(mapping.len(CROP_PAD_X));
+        cropPadY = (int) Math.round(mapping.len(CROP_PAD_Y));
+        stepMin = mapping.len(STEP_MIN);
+        stepMax = mapping.len(STEP_MAX);
+        stepIdeal = mapping.len(STEP_IDEAL);
+        holeMinW = mapping.len(HOLE_MIN_W);
+        holeMaxW = mapping.len(HOLE_MAX_W);
+        holeMinH = mapping.len(HOLE_MIN_H);
+        holeMaxH = mapping.len(HOLE_MAX_H);
+    }
+
+    /** Where this fan's reference coordinates land. */
+    public ViewMapping mapping() {
+        return mapping;
     }
 
     /** Expected pin position of plate {@code i} in an {@code n}-plate fan (offset-independent). */

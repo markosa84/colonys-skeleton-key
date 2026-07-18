@@ -95,6 +95,13 @@ public final class Tone {
     private static final int OFF_FAMILY = 24;
 
     /**
+     * How far below the white the ink must be sought, so the panel's own antialiasing does not get a
+     * vote. The two plateaus are never closer than this: the tightest measured pair is HDR's 36 and
+     * 199, and the tightest gamma setting's is 100 and 255.
+     */
+    private static final int INK_GAP = 40;
+
+    /**
      * Nothing to correct: the identity. This is what every existing test gets, and what a frame at
      * the calibrated gamma resolves to - so the 217-frame corpus keeps vouching for the reader's
      * constants unchanged.
@@ -121,22 +128,57 @@ public final class Tone {
      * <b>viewport</b> is wrong, the other way this tool has failed in the field.
      */
     public static Tone estimate(BufferedImage frame, Viewport viewport) {
-        int[] histogram = panel(frame, GameScreen.picksBox(viewport));
+        return estimate(frame, viewport.mapping());
+    }
+
+    /**
+     * The same, against a mapping - which is what a corrected one must be re-estimated through. The
+     * probe is a box at a fixed <i>reference</i> position, so a mapping that moves the lock moves the
+     * panel with it; reading the gamma through the old one would probe whatever now sits there.
+     */
+    public static Tone estimate(BufferedImage frame, ViewMapping mapping) {
+        int[] histogram = panel(frame, GameScreen.picksBox(mapping));
         if (histogram == null) {
             return UNREADABLE;
         }
-        // The panel is white with dark digits on it, so its background is the biggest plateau in the
-        // box, whatever level the gamma has put it at - which is why the white is found as the mode
-        // of the whole histogram rather than of some assumed upper band. (It used to be sought above
-        // 128, which quietly assumed the ink stays below that. The ink climbs with the gamma: it is
-        // already at 100 at the top of the slider.) The ink is then the biggest thing well below the
-        // white, the gap keeping the panel's own antialiasing out of the answer.
-        int white = mode(histogram, 0, 256);
-        int ink = mode(histogram, 0, Math.max(1, white - 40));
+        int white = white(histogram);
+        int ink = ink(histogram, white);
         if (!plausible(histogram, ink, white)) {
             return UNREADABLE;
         }
         return new Tone(curve(ink, white), ink, white);
+    }
+
+    /**
+     * The panel's background: the biggest plateau in the box, whatever level the gamma has put it
+     * at - which is why it is the mode of the whole histogram rather than of some assumed upper
+     * band. (It used to be sought above 128, which quietly assumed the ink stays below that. The ink
+     * climbs with the gamma: it is already at 100 at the top of the slider.)
+     */
+    private static int white(int[] histogram) {
+        return mode(histogram, 0, 256);
+    }
+
+    /** The digits: the biggest thing well below the white. See {@link #INK_GAP}. */
+    private static int ink(int[] histogram, int white) {
+        return mode(histogram, 0, Math.max(1, white - INK_GAP));
+    }
+
+    /**
+     * Where this panel separates its <b>digits</b> from the box behind them - the midpoint of its two
+     * plateaus - or -1 when what is in the box is not a panel at all.
+     *
+     * <p>Shared with {@link GameScreen#pickCounterFingerprint}, which has to split the same box for a
+     * different reason: this class indexes the gamma family by the two plateaus, and the fingerprint
+     * thresholds between them. Neither can use an absolute number - the plateaus move together with
+     * the slider, from 0/244 at gamma 1.2 to 100/255 at 3.2, and an HDR tonemap puts them somewhere
+     * the slider cannot reach at all (11-36 / 183-199). Measured across all of that they are never
+     * closer than <b>155</b> levels, so their midpoint is a wide and stable place to cut.
+     */
+    static int panelSplit(int[] histogram) {
+        int white = white(histogram);
+        int ink = ink(histogram, white);
+        return plausible(histogram, ink, white) ? (ink + white) / 2 : -1;
     }
 
     /**
@@ -245,6 +287,17 @@ public final class Tone {
         for (int y = box.y; y < box.y + box.height; y++) {
             for (int x = box.x; x < box.x + box.width; x++) {
                 histogram[LockReader.luminance(frame.getRGB(x, y))]++;
+            }
+        }
+        return histogram;
+    }
+
+    /** Luminance histogram of a whole image - what {@link GameScreen} grabs the panel as. */
+    static int[] histogram(BufferedImage img) {
+        int[] histogram = new int[256];
+        for (int y = 0; y < img.getHeight(); y++) {
+            for (int x = 0; x < img.getWidth(); x++) {
+                histogram[LockReader.luminance(img.getRGB(x, y))]++;
             }
         }
         return histogram;

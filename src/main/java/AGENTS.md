@@ -21,15 +21,24 @@
   them directly); `LockReader`'s and `FanGeometry`'s pixel constants are 4K reference values mapped
   through `Viewport` at construction — edit the reference constants, never the scaled instance fields.
 
-- **Every colour and luminance constant assumes the CALIBRATED gamma, and `Tone` is what makes that
-  true.** `new LockReader(viewport)` means "this frame is already at gamma 2.7" — right for the
-  fixtures, and right for nothing else. Live, `AutoLockpick` measures the gamma off the frame once per
-  F8 (`Tone.estimate`) and passes it to *both* `LockReader` and `GameScreen`; the reader maps every
-  pixel through it inside `isPin` and the hole scan, and `GameScreen` does the same before
-  thresholding the lockpick counter. **If you add a pixel gate, it must sit behind `tone.map(...)`
-  too** — an absolute number applied to a raw frame is a number that is only true for the author's
-  screen. The curves are measured (`tools/ToneTable.java`), never fitted: see CLAUDE.md's dead end on
-  extrapolating one, which is a mistake that has already been made here and it destroys the pins.
+- **Every colour and luminance constant in `LockReader` assumes the CALIBRATED gamma, and `Tone` is
+  what makes that true.** `new LockReader(viewport)` means "this frame is already at gamma 2.7" —
+  right for the fixtures, and right for nothing else. Live, `AutoLockpick` measures the gamma off the
+  frame once per F8 (`Tone.estimate`) and hands it to the reader, which maps every pixel through it
+  inside `isPin` and the hole scan. **If you add a pixel gate to `LockReader`, it must sit behind
+  `tone.map(...)` too** — an absolute number applied to a raw frame is a number that is only true for
+  the author's screen. The curves are measured (`tools/ToneTable.java`), never fitted: see CLAUDE.md's
+  dead end on extrapolating one, which is a mistake that has already been made here and it destroys
+  the pins.
+
+- **Better still, don't need the curve.** `LatticeReader` (the default) and
+  `GameScreen.pickCounterFingerprint` both ask only for **ratios of what is in the box**, so they
+  hold under any monotone tone map — which is what a gamma LUT and an HDR tonemap both are.
+  `GameScreen` no longer takes a `Tone` at all: it cuts the lockpick counter at the midpoint of the
+  panel's own ink and white plateaus (`Tone.panelSplit`, shared with the gamma probe). The absolute
+  `110` it replaced was not broken on any measured frame — it was clearing gamma 3.2's ink by ten
+  levels and clearing HDR's only via a curve the reader itself refuses to trust. Prefer a gate the
+  frame answers for itself over one the `Tone` has to rescue.
 
 - **Plate index orientation:** index `0` = back-most plate (top of the fan), `n-1` = front (the dark
   plate holding the keyhole/pick). The user's "panel 1..N" numbering is the REVERSE (front→back), so

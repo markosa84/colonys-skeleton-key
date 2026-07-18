@@ -212,13 +212,18 @@ public final class LatticeReader implements LockAnalyzer {
     }
 
     public LatticeReader(Viewport viewport, Tone tone) {
+        this(viewport.mapping(), tone);
+    }
+
+    /** Against a mapping directly, however it was arrived at. See {@link FanGeometry}'s. */
+    public LatticeReader(ViewMapping mapping, Tone tone) {
         this.tone = tone;
-        this.geo = new FanGeometry(viewport);
-        // Areas are the one thing that DOES scale with the viewport, and quadratically: a hole is a
+        this.geo = new FanGeometry(mapping);
+        // Areas are the one thing that DOES scale with the view, and quadratically: a hole is a
         // hole, but it is fewer pixels on a smaller screen. The slack is because these blobs are traced
         // at a different threshold than the one the bounds were measured at - see SHAPE_SLACK.
-        this.holeMinArea = viewport.area(LockReader.HOLE_MIN_AREA) / (SHAPE_SLACK * SHAPE_SLACK);
-        this.holeMaxArea = viewport.area(LockReader.HOLE_MAX_AREA) * SHAPE_SLACK * SHAPE_SLACK;
+        this.holeMinArea = mapping.area(LockReader.HOLE_MIN_AREA) / (SHAPE_SLACK * SHAPE_SLACK);
+        this.holeMaxArea = mapping.area(LockReader.HOLE_MAX_AREA) * SHAPE_SLACK * SHAPE_SLACK;
         this.holeMinW = geo.holeMinW / SHAPE_SLACK;
         this.holeMaxW = geo.holeMaxW * SHAPE_SLACK;
         this.holeMinH = geo.holeMinH / SHAPE_SLACK;
@@ -701,19 +706,20 @@ public final class LatticeReader implements LockAnalyzer {
     private int walk(List<Double> rowHoles, double px, int dir, boolean allowSkip) {
         double cur = px;
         int slots = 0;
+        double skipMin = geo.mapping().len(LockReader.SKIP_MIN);
+        double skipMax = geo.mapping().len(LockReader.SKIP_MAX);
+        double skipIdeal = geo.mapping().len(LockReader.SKIP_IDEAL);
         while (slots < HOLES) {
             double bestX = 0, bestErr = Double.MAX_VALUE;
             int bestSlots = 0;
             for (double x : rowHoles) {
                 double d = (x - cur) * dir;
                 int step = (d >= geo.stepMin && d <= geo.stepMax) ? 1
-                        : (allowSkip && d >= LockReader.SKIP_MIN * geo.viewport().scale()
-                                && d <= LockReader.SKIP_MAX * geo.viewport().scale()) ? 2 : 0;
+                        : (allowSkip && d >= skipMin && d <= skipMax) ? 2 : 0;
                 if (step == 0) {
                     continue;
                 }
-                double err = Math.abs(d - (step == 1 ? geo.stepIdeal
-                        : LockReader.SKIP_IDEAL * geo.viewport().scale()));
+                double err = Math.abs(d - (step == 1 ? geo.stepIdeal : skipIdeal));
                 if (err < bestErr) {
                     bestErr = err;
                     bestX = x;

@@ -163,18 +163,23 @@ public final class LockReader implements LockAnalyzer {
     }
 
     public LockReader(Viewport viewport, Tone tone) {
+        this(viewport.mapping(), tone);
+    }
+
+    /** Against a mapping directly, however it was arrived at. See {@link FanGeometry}'s. */
+    public LockReader(ViewMapping mapping, Tone tone) {
         this.tone = tone;
-        this.geo = new FanGeometry(viewport);
-        clusterRadius = viewport.len(CLUSTER_RADIUS);
-        pinMinPixels = viewport.area(PIN_MIN_PIXELS);
-        pinMaxPixels = viewport.area(PIN_MAX_PIXELS);
-        centeredMinPixels = viewport.area(CENTERED_MIN_PIXELS);
-        matchMaxDist = viewport.len(MATCH_MAX_DIST);
-        holeMinArea = viewport.area(HOLE_MIN_AREA);
-        holeMaxArea = viewport.area(HOLE_MAX_AREA);
-        skipMin = viewport.len(SKIP_MIN);
-        skipMax = viewport.len(SKIP_MAX);
-        skipIdeal = viewport.len(SKIP_IDEAL);
+        this.geo = new FanGeometry(mapping);
+        clusterRadius = mapping.len(CLUSTER_RADIUS);
+        pinMinPixels = mapping.area(PIN_MIN_PIXELS);
+        pinMaxPixels = mapping.area(PIN_MAX_PIXELS);
+        centeredMinPixels = mapping.area(CENTERED_MIN_PIXELS);
+        matchMaxDist = mapping.len(MATCH_MAX_DIST);
+        holeMinArea = mapping.area(HOLE_MIN_AREA);
+        holeMaxArea = mapping.area(HOLE_MAX_AREA);
+        skipMin = mapping.len(SKIP_MIN);
+        skipMax = mapping.len(SKIP_MAX);
+        skipIdeal = mapping.len(SKIP_IDEAL);
     }
 
     /** A detected pin: screen centroid and blob size (px); the pop threshold lives in the reader. */

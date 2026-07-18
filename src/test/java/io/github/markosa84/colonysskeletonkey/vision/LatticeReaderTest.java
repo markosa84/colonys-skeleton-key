@@ -1,7 +1,6 @@
 package io.github.markosa84.colonysskeletonkey.vision;
 
 import java.awt.image.BufferedImage;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Stream;
 
@@ -10,8 +9,6 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
-
-import io.github.markosa84.colonysskeletonkey.solver.LockModel;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -28,14 +25,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * returns nothing on (demonstrated in {@code tools/ReaderBench}; the corpus has no labelled HDR frame,
  * so the dark end of the gamma slider is the darkest in-corpus proxy here).
  *
- * <p>Two kinds of assertion:
- * <ul>
- *   <li><b>the reads</b>, exactly: plate count and every offset, on the whole corpus;</li>
- *   <li><b>the safety properties</b> a session leans on, also on the whole corpus: never a
- *       <b>wrong</b> plate count (a wrong smaller count is the bug that cost a player picks), never a
- *       <b>false pop</b> (says centred when it is not, which could call a lock open that is not), and
- *       every offset in range or {@link LockModel#UNKNOWN}.</li>
- * </ul>
+ * <p>This is where <b>the reads</b> are pinned, exactly: plate count and every offset, over the whole
+ * corpus. The safety properties every reader owes - never a wrong plate count, never a false pop,
+ * every offset in range or UNKNOWN - are not this reader's business alone and live in
+ * {@link AnalyzerContractTest}, which asks them of both.
  *
  * <p>No game and no display are needed: the reader is pure frame analysis, so everything here reads
  * PNGs headless.
@@ -83,59 +76,6 @@ class LatticeReaderTest {
         BufferedImage img = TestFrames.load(frame);
         assertEquals(expected.length, reader.detectPlateCount(img), frame + ": plate count");
         assertArrayEquals(expected, reader.readState(img, expected.length), frame + ": offsets");
-    }
-
-    // -- the safety properties, over the whole corpus ----------------------------------------------
-
-    /**
-     * <b>Never a wrong plate count.</b> The one answer a reader must never give is a plausible-but-wrong
-     * count: it hands the session a model with the wrong number of plates to drive into walls. The right
-     * count or -1 are both safe; a different 4..7 is not.
-     */
-    @ParameterizedTest(name = "{0}")
-    @MethodSource("everyLabelledFrame")
-    void neverAnswersAWrongPlateCount(String frame, Viewport viewport, int[] expected) {
-        BufferedImage img = TestFrames.load(frame);
-        int n = new LatticeReader(viewport, Tone.estimate(img, viewport)).detectPlateCount(img);
-        assertTrue(n == expected.length || n == -1,
-                frame + ": plate count was " + n + ", which is neither the truth (" + expected.length
-                        + ") nor a refusal (-1)");
-    }
-
-    /**
-     * <b>Never a false pop.</b> {@code readCentered} is the only signal a lock may be declared open
-     * from, so the error it must not make is saying a plate is centred when it is not. A missed pop -
-     * a real one read too faint - only costs a re-read, and does happen at small resolutions; a false
-     * pop could call a lock open that is not, and must never happen. It doesn't, on any frame.
-     */
-    @ParameterizedTest(name = "{0}")
-    @MethodSource("everyLabelledFrame")
-    void neverFalsePops(String frame, Viewport viewport, int[] expected) {
-        BufferedImage img = TestFrames.load(frame);
-        boolean[] centred = new LatticeReader(viewport, Tone.estimate(img, viewport))
-                .readCentered(img, expected.length);
-        for (int i = 0; i < expected.length; i++) {
-            if (centred[i]) {
-                assertEquals(0, expected[i],
-                        frame + ": plate " + i + " read as popped, but its offset is " + expected[i]);
-            }
-        }
-    }
-
-    /** Every offset it returns is a real one - in [-3, +3], or UNKNOWN, never anything else. */
-    @ParameterizedTest(name = "{0}")
-    @MethodSource("everyLabelledFrame")
-    void everyOffsetIsInRangeOrUnknown(String frame, Viewport viewport, int[] expected) {
-        BufferedImage img = TestFrames.load(frame);
-        LatticeReader reader = new LatticeReader(viewport, Tone.estimate(img, viewport));
-        int n = reader.detectPlateCount(img);
-        if (n < LockModel.MIN_PLATES) {
-            return;
-        }
-        for (int v : reader.readState(img, n)) {
-            assertTrue(v == LockModel.UNKNOWN || (v >= -LockModel.MAX_OFFSET && v <= LockModel.MAX_OFFSET),
-                    frame + ": offset " + v + " is out of range");
-        }
     }
 
     // -- it counts holes, not pins -----------------------------------------------------------------
@@ -241,96 +181,17 @@ class LatticeReaderTest {
         }
     }
 
-    // -- frame sets --------------------------------------------------------------------------------
+    // -- frame sets: the labels live in FrameCorpus, and nowhere else ------------------------------
 
-    /** The 4K census - the same labels {@code LockReaderTest} pins, from the same slide sequences. */
     static Stream<Arguments> censusFrames() {
-        List<Arguments> frames = new ArrayList<>();
-        frames.add(census("5p-plates-1-2-opposed/step-0.png", 0, 3, -2, 3, 3));
-        frames.add(census("5p-plates-1-2-opposed/step-1.png", 0, 2, -1, 3, 3));
-        frames.add(census("5p-plates-1-2-opposed/step-2.png", 0, 1, 0, 3, 3));
-        frames.add(census("5p-plates-1-2-opposed/step-3.png", 0, 0, 1, 3, 3));
-        frames.add(census("5p-plates-1-2-opposed/step-4.png", 0, -1, 2, 3, 3));
-        frames.add(census("5p-plates-1-2-opposed/step-5.png", 0, -2, 3, 3, 3));
-        for (int k = 0; k < 7; k++) {
-            frames.add(census("6p-plate-5-sweep/step-" + k + ".png", 3, 0, 1, 2, -3, k - 3));
-        }
-        for (int k = 0; k < 4; k++) {
-            frames.add(census("6p-plate-0-drags-1/step-" + k + ".png", 3 - k, -k, 1, 2, -3, -2));
-        }
-        for (int k = 0; k < 6; k++) {
-            frames.add(census("6p-plates-0-and-5/step-0" + k + ".png", 3 - k, -1, 0, 2 - k, 3, -2));
-        }
-        frames.add(census("6p-plates-0-and-5/step-06.png", -3, -1, -1, -3, 3, -2));
-        for (int k = 0; k < 7; k++) {
-            frames.add(census("6p-plates-0-and-5/step-" + String.format("%02d", 7 + k) + ".png",
-                    -3, -1, -1, -3, 3, k - 3));
-        }
-        frames.add(census("6p-gap-shadow/step-0.png", 2, 1, 1, -2, 3, -3));
-        for (int k = 0; k <= 6; k++) {
-            frames.add(census("7p-plate-2-sweep/step-" + k + ".png", 0, -2, k - 3, 3, 3, 2, 3));
-        }
-        for (int k = 0; k <= 6; k++) {
-            frames.add(census("7p-plate-6-drags-1/step-" + k + ".png", 0, 3 - k, -3, 3, 3, 2, 3 - k));
-        }
-        for (int k = 0; k <= 6; k++) {
-            frames.add(census("7p-plate-0-drags-4/step-" + k + ".png", 3 - k, 0, -3, 0, 3 - k, 2, 3));
-        }
-        return frames.stream();
-    }
-
-    private static Arguments census(String path, int... expected) {
-        return Arguments.of(path, expected);
+        return FrameCorpus.censusFrames();
     }
 
     static Stream<Arguments> gammaFrames() {
-        List<Arguments> frames = new ArrayList<>();
-        for (String gamma : new String[] {"1.2", "3.2"}) {
-            for (int k = 0; k <= 6; k++) {
-                frames.add(Arguments.of("gamma/g-" + gamma + "/step-" + k + ".png",
-                        Viewport.REFERENCE, chest(k)));
-            }
-        }
-        for (int k = 0; k <= 6; k++) {
-            frames.add(Arguments.of("2560x1440/gamma-1.2-sweep/step-" + k + ".png",
-                    new Viewport(2560, 1440), chest(k)));
-        }
-        for (String gamma : new String[] {"1.5", "1.8", "2.1", "2.4", "2.7", "3.0"}) {
-            frames.add(Arguments.of("gamma/g-" + gamma + ".png", Viewport.REFERENCE, chest(0)));
-        }
-        return frames.stream();
+        return FrameCorpus.gammaFrames();
     }
-
-    static final String[] SWEEP_MODES = {
-            "3840x2160", "2560x1600", "2560x1440", "2048x1536", "1920x1440", "1920x1200",
-            "1920x1080", "1680x1050", "1600x1200", "1600x1024", "1600x900", "1440x1080",
-            "1366x768", "1360x768", "1280x1024", "1280x960", "1280x800", "1280x768",
-            "1280x720", "1176x664", "1152x864", "1024x768", "800x600",
-    };
 
     static Stream<Arguments> sweepFrames() {
-        List<Arguments> frames = new ArrayList<>();
-        for (String mode : SWEEP_MODES) {
-            String[] wh = mode.split("x");
-            Viewport viewport = new Viewport(Integer.parseInt(wh[0]), Integer.parseInt(wh[1]));
-            for (int k = 0; k <= 6; k++) {
-                frames.add(Arguments.of(mode + "/front-plate-sweep/step-" + k + ".png",
-                        viewport, new int[] {3, 1, 2, 0, 3 - k}));
-            }
-        }
-        return frames.stream();
-    }
-
-    /** Every labelled frame with its viewport - for the whole-corpus safety properties. */
-    static Stream<Arguments> everyLabelledFrame() {
-        List<Arguments> frames = new ArrayList<>();
-        censusFrames().forEach(a -> frames.add(Arguments.of(a.get()[0], Viewport.REFERENCE, a.get()[1])));
-        gammaFrames().forEach(frames::add);
-        sweepFrames().forEach(frames::add);
-        return frames.stream();
-    }
-
-    static int[] chest(int k) {
-        return new int[] {0, -2, k - 3, 3, 3, 2, 3};
+        return FrameCorpus.sweepFrames();
     }
 }
