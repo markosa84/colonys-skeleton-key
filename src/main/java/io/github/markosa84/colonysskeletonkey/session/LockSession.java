@@ -127,6 +127,20 @@ public final class LockSession {
      * failed one counts.
      */
     private static final int MAX_GAMBLE_STRAINS = 3;
+    /**
+     * Suspect re-probes a stuck-unsolvable run may spend before it gives up. A misread while probing
+     * corrupts one plate's connection row and makes the whole model unopenable; because the game only
+     * ever hands out solvable locks, a fully-probed model that will not solve is proof of exactly that,
+     * so the run re-probes the likeliest culprit rather than shrugging. Bounded so a genuinely
+     * multiply-corrupted read still stops and dumps its frame instead of churning.
+     */
+    private static final int MAX_RECOVERY_RESETS = 4;
+    /**
+     * Broken picks the unsolvable-model recovery may cost - well under {@link #MAX_PICKS}, so rescuing
+     * a misread can never eat the inventory. These dark-frame locks are usually untrained, where every
+     * second strain breaks a pick and a break resets the puzzle, so the recovery must stay cheap.
+     */
+    private static final int MAX_RECOVERY_PICKS = 2;
 
     private final LockView view;
     private final CursorKeys keys;
@@ -179,6 +193,26 @@ public final class LockSession {
     private boolean inEscalation;
     /** Row corrections seen ({@link #learn} folding a different row over a wrong one); a progress signal. */
     private int corrections;
+    /**
+     * Plates whose learned row was ever contradicted by a later observation - the first suspects when a
+     * fully-probed model still will not open. A misread that only shows up in one configuration reads
+     * differently once, and that disagreement is the loudest clue to which plate was misread.
+     */
+    private boolean[] contested;
+    /** Clean observations folded into each plate's row so far; a low count is a weakly-confirmed row. */
+    private int[] observationCount;
+    /**
+     * Suspect plates already re-probed by the unsolvable-model recovery without their row changing.
+     * Skipped when choosing the next suspect, so recovery moves on instead of re-clearing the same
+     * plate; cleared the moment any re-probe actually changes a row (real progress - see {@link #learn}).
+     */
+    private final Set<Integer> recoveryTried = new HashSet<>();
+    /** The row a recovery reset cleared, kept so a re-probe returning a DIFFERENT row counts as progress. */
+    private final Map<Integer, Connection[]> preRecoveryRow = new HashMap<>();
+    /** Suspect re-probes spent this run, capped at {@link #MAX_RECOVERY_RESETS}. */
+    private int recoveryResets;
+    /** Broken-pick count when recovery first fired, to bound its spend to {@link #MAX_RECOVERY_PICKS}. */
+    private int breaksWhenRecoveryBegan;
     /**
      * Configurations visited since the last new fact, to catch any move loop that makes no progress.
      * Cleared whenever the run learns something ({@link #knowledgeSignature} changes); a repeat within
@@ -259,6 +293,12 @@ public final class LockSession {
             return;
         }
         conn = new Connection[n][];
+        contested = new boolean[n];
+        observationCount = new int[n];
+        recoveryTried.clear();
+        preRecoveryRow.clear();
+        recoveryResets = 0;
+        breaksWhenRecoveryBegan = -1;
         refused.clear();
         occluded.clear();
         plan = null;
@@ -379,10 +419,15 @@ public final class LockSession {
                     // Every connection is known, yet the solver found no way to open it. A real lock is
                     // always openable and every move is reversible, so a fully-learned model that will
                     // not solve is a mislearned connection - a misread while probing, almost always on a
-                    // dark frame. (solvingMove has already printed which configuration it gave up on.)
+                    // dark frame. Rather than give up, re-probe the likeliest misread plate: recovery
+                    // clears it and lets discovery relearn it from the configuration the lock is now in.
+                    if (tryRecoverUnsolvable()) {
+                        continue;
+                    }
                     System.out.println("The connections I learned do not add up to a lock that opens, "
                             + "but the game only ever gives you locks that do - so I misread a plate "
-                            + "while learning it. This frame is dark. Saved it.");
+                            + "while learning it, and re-probing could not correct it. This frame is "
+                            + "dark. Saved it.");
                     view.dumpFrame("unsolvable-model");
                     System.out.println("Please report the saved .png and the .txt beside it.");
                     return;
@@ -450,8 +495,11 @@ public final class LockSession {
             moves++;
             if (LockModel.isComplete(obs.state())) {
                 cur = obs.state();
-                learn(p, before, cur);
-                advancePlan(move);
+                if (learn(p, before, cur)) {
+                    advancePlan(move);
+                } else {
+                    plan = null; // the frame was a misread, not a fact; re-plan from a fresh look
+                }
             } else {
                 plan = null;
                 partiallyObserved(move, before, obs.state());
@@ -515,28 +563,260 @@ public final class LockSession {
         }
     }
 
-    /** A successful move reveals exactly what {@code p} drags - which also repairs a wrong row. */
-    private void learn(int p, int[] before, int[] after) {
+    /**
+     * A successful move reveals exactly what {@code p} drags - which also repairs a wrong row. Returns
+     * false, learning nothing, when the frame is physically impossible: the plate we slid reads as not
+     * having moved at all, though the game accepted the slide. That is a misread, and a zero reference
+     * would brand every other plate inverted, so the row is left as it was for a re-probe.
+     */
+    private boolean learn(int p, int[] before, int[] after) {
+        int moverDelta = after[p] - before[p];
+        if (moverDelta == 0) {
+            return false; // impossible read of the plate we moved; do not fold it into the model
+        }
         List<Connection> row = new ArrayList<>();
         for (int q = 0; q < n; q++) {
             if (q == p || after[q] == before[q]) continue;
-            Connection.Type type =
-                    Integer.signum(after[q] - before[q]) == Integer.signum(after[p] - before[p])
-                            ? Connection.Type.NORMAL : Connection.Type.INVERTED;
+            Connection.Type type = Integer.signum(after[q] - before[q]) == Integer.signum(moverDelta)
+                    ? Connection.Type.NORMAL : Connection.Type.INVERTED;
             row.add(new Connection(q, type));
         }
         boolean first = conn[p] == null;
         Connection[] learned = row.toArray(new Connection[0]);
-        if (!first && !Arrays.equals(conn[p], learned)) {
+        // What this reading disagrees with: a row already in hand, or - if the plate was just cleared for
+        // a recovery re-probe - the row that recovery threw away. Either way a change is real progress.
+        Connection[] previous = first ? preRecoveryRow.remove(p) : conn[p];
+        if (previous != null && !Arrays.equals(previous, learned)) {
             plan = null; // the model the plan was built on was wrong about this plate
             corrections++; // a fact changed - progress, for the loop guard
+            contested[p] = true; // this plate read two different ways: a prime misread suspect
+            recoveryTried.clear(); // the model just improved; let recovery reconsider every plate
         }
         conn[p] = learned;
+        observationCount[p]++;
         if (first) {
             inEscalation = false; // a plate newly probed is real progress; leave the escalation regime
             System.out.println("  plate " + p + " drags " + describe(conn[p])
                     + (allProbed() ? "  -- every connection known, solving" : ""));
         }
+        return true;
+    }
+
+    // --- recovering from a model that will not open ---
+
+    /**
+     * A fully-probed model the solver cannot open means a misread corrupted one plate's row - the game
+     * only ever hands out solvable locks. So rather than give up, find the plate whose row could be
+     * edited to a solvable model (the likeliest culprit), clear it, and let discovery re-probe it in
+     * the configuration the lock is now in - different from where it was first learned, so a
+     * configuration-specific misread reads differently this time. The edit only <i>names</i> the
+     * suspect; the fresh probe, not the edit, is what is trusted, and every later solving move stays
+     * verified besides. Bounded by {@link #MAX_RECOVERY_RESETS} and {@link #MAX_RECOVERY_PICKS} so a
+     * multiply-corrupted read still stops and dumps rather than eating picks.
+     */
+    private boolean tryRecoverUnsolvable() {
+        if (recoveryResets >= MAX_RECOVERY_RESETS) {
+            return false;
+        }
+        if (breaksWhenRecoveryBegan >= 0
+                && observedBreaks - breaksWhenRecoveryBegan >= MAX_RECOVERY_PICKS) {
+            return false;
+        }
+        int suspect = suspectPlate();
+        if (suspect < 0) {
+            return false;
+        }
+        if (breaksWhenRecoveryBegan < 0) {
+            breaksWhenRecoveryBegan = observedBreaks;
+        }
+        preRecoveryRow.put(suspect, conn[suspect]);
+        recoveryTried.add(suspect);
+        conn[suspect] = null; // re-enables discovery, which will re-probe it (nextAction gates on allProbed)
+        plan = null;
+        corrections++; // a suspect cleared is progress: reconsider the plan, reset the loop guard
+        recoveryResets++;
+        System.out.println("  the learned model will not open the lock, which can only be a misread "
+                + "while probing. Re-probing plate " + suspect + " to correct it.");
+        trace("recovery: re-probing plate " + suspect + " (no solution from " + Arrays.toString(cur)
+                + "), reset " + recoveryResets + "/" + MAX_RECOVERY_RESETS);
+        return true;
+    }
+
+    /**
+     * The plate most likely misread: among those a single row-edit could make solvable and not already
+     * re-probed unproductively, prefer a contested one, then the most minimal edit (a flipped
+     * connection over a dropped or added one), then the least-confirmed row. Returns -1 when no single
+     * edit opens the lock - a read corrupted in more than one place, which recovery cannot pick apart.
+     */
+    private int suspectPlate() {
+        LockModel base = model();
+        int best = -1;
+        int bestRank = Integer.MAX_VALUE;
+        for (int p = 0; p < n; p++) {
+            if (recoveryTried.contains(p)) {
+                continue;
+            }
+            int rank = singleEditRank(base, cur, p);
+            if (rank == Integer.MAX_VALUE) {
+                continue;
+            }
+            if (best < 0 || betterSuspect(p, rank, best, bestRank)) {
+                best = p;
+                bestRank = rank;
+            }
+        }
+        return best;
+    }
+
+    /** True if plate {@code p} (fixable at {@code rank}) is a better suspect than the incumbent. */
+    private boolean betterSuspect(int p, int rank, int incumbent, int incumbentRank) {
+        if (contested[p] != contested[incumbent]) {
+            return contested[p];
+        }
+        if (rank != incumbentRank) {
+            return rank < incumbentRank;
+        }
+        return observationCount[p] < observationCount[incumbent];
+    }
+
+    /**
+     * The most minimal single-edit to plate {@code p}'s row that makes the all-centered goal reachable
+     * from {@code from}: 0 flips one connection's direction, 1 drops one, 2 flips them all (a mover
+     * misread reverses the whole row's sense), 3 adds one absent drag. {@link Integer#MAX_VALUE} if no
+     * single edit opens the lock. Package-private and static so the search can be pinned directly
+     * against the models real reports learned - see {@code LockSessionTest}.
+     */
+    static int singleEditRank(LockModel m, int[] from, int p) {
+        Connection[] row = m.connections()[p];
+        if (anyReaches(m, from, p, flipEach(row))) {
+            return 0;
+        }
+        if (anyReaches(m, from, p, dropEach(row))) {
+            return 1;
+        }
+        if (row.length > 1 && reaches(m, from, p, flipAll(row))) {
+            return 2;
+        }
+        if (anyReaches(m, from, p, addEach(m.n(), p, row))) {
+            return 3;
+        }
+        return Integer.MAX_VALUE;
+    }
+
+    private static boolean anyReaches(LockModel m, int[] from, int p, List<Connection[]> candidates) {
+        for (Connection[] candidate : candidates) {
+            if (reaches(m, from, p, candidate)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean reaches(LockModel m, int[] from, int p, Connection[] row) {
+        return reachesGoal(modelWith(m, p, row), from);
+    }
+
+    /** Every row that differs from {@code row} by flipping exactly one connection's direction. */
+    private static List<Connection[]> flipEach(Connection[] row) {
+        List<Connection[]> out = new ArrayList<>();
+        for (int j = 0; j < row.length; j++) {
+            Connection[] c = row.clone();
+            c[j] = new Connection(row[j].target(), flip(row[j].type()));
+            out.add(c);
+        }
+        return out;
+    }
+
+    /** Every row that differs from {@code row} by dropping exactly one connection. */
+    private static List<Connection[]> dropEach(Connection[] row) {
+        List<Connection[]> out = new ArrayList<>();
+        for (int j = 0; j < row.length; j++) {
+            Connection[] c = new Connection[row.length - 1];
+            for (int k = 0, w = 0; k < row.length; k++) {
+                if (k != j) {
+                    c[w++] = row[k];
+                }
+            }
+            out.add(c);
+        }
+        return out;
+    }
+
+    /** {@code row} with every connection's direction flipped - the shape of a misread mover frame. */
+    private static Connection[] flipAll(Connection[] row) {
+        Connection[] c = new Connection[row.length];
+        for (int j = 0; j < row.length; j++) {
+            c[j] = new Connection(row[j].target(), flip(row[j].type()));
+        }
+        return c;
+    }
+
+    /** Every row that adds one absent drag target to {@code row}, as normal and as inverted. */
+    private static List<Connection[]> addEach(int n, int p, Connection[] row) {
+        boolean[] present = new boolean[n];
+        for (Connection c : row) {
+            present[c.target()] = true;
+        }
+        List<Connection[]> out = new ArrayList<>();
+        for (int q = 0; q < n; q++) {
+            if (q == p || present[q]) {
+                continue;
+            }
+            for (Connection.Type type : Connection.Type.values()) {
+                Connection[] c = Arrays.copyOf(row, row.length + 1);
+                c[row.length] = new Connection(q, type);
+                out.add(c);
+            }
+        }
+        return out;
+    }
+
+    private static Connection.Type flip(Connection.Type type) {
+        return type == Connection.Type.NORMAL ? Connection.Type.INVERTED : Connection.Type.NORMAL;
+    }
+
+    /** {@code m} with plate {@code p}'s connection row replaced by {@code row}. */
+    private static LockModel modelWith(LockModel m, int p, Connection[] row) {
+        Connection[][] known = m.connections().clone();
+        known[p] = row;
+        return new LockModel(m.n(), m.start(), known, m.maxOffset());
+    }
+
+    /**
+     * True if the all-centered configuration is reachable from {@code from} under {@code m}. A plain
+     * reachability flood over the configuration space (at most 7^7 states), which is all the suspect
+     * search needs and far cheaper than a least-cost {@link LockSolver#solve}.
+     */
+    private static boolean reachesGoal(LockModel m, int[] from) {
+        int span = 2 * m.maxOffset() + 1;
+        int size = 1;
+        for (int i = 0; i < m.n(); i++) {
+            size *= span;
+        }
+        boolean[] seen = new boolean[size];
+        Deque<int[]> queue = new ArrayDeque<>();
+        seen[(int) LockSolver.encode(m, from)] = true;
+        queue.add(from.clone());
+        while (!queue.isEmpty()) {
+            int[] state = queue.poll();
+            if (LockSolver.isGoal(state)) {
+                return true;
+            }
+            for (int p = 0; p < m.n(); p++) {
+                for (int dir = -1; dir <= 1; dir += 2) {
+                    int[] next = LockSolver.applyMove(m, state, p, dir);
+                    if (next == null) {
+                        continue;
+                    }
+                    int key = (int) LockSolver.encode(m, next);
+                    if (!seen[key]) {
+                        seen[key] = true;
+                        queue.add(next);
+                    }
+                }
+            }
+        }
+        return false;
     }
 
     // --- hidden rows ---

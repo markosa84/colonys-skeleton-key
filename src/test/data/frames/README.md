@@ -1,6 +1,6 @@
 # Labelled calibration frames
 
-These 223 PNGs are the test fixtures the vision layer is calibrated and gated against — every pixel
+These 227 PNGs are the test fixtures the vision layer is calibrated and gated against — every pixel
 constant in `LockReader` is fitted to them, and both readers' tests replay them on every build. (The
 seven `hdr/` frames are the exception: only the tone-free `LatticeReader` reads them, because
 `LockReader` refuses HDR — correctly.) They are captures of the Gothic 1 Remake lockpicking minigame
@@ -23,6 +23,7 @@ it too, or the corpus starts growing by ~12 MB a shot.
 | `<width>x<height>/front-plate-sweep/` | one 5-plate lock replayed at all 19 display modes at/above the 1280×720 floor, 1280x720 to 4K — this is what validates the `Viewport` scaling against real renders |
 | `gamma/` | one 7-plate lock replayed across the game's **gamma slider**, 1.2 to 3.2 — what `vision/Tone` is measured against and gated by. Raw, the two ends break the reader in opposite ways |
 | `2560x1440/gamma-1.2-sweep/` | the dark end at the resolution a user actually reported broken: gamma and scale are independent faults |
+| `2560x1440/dark-6plate/` | four `unsolvable-model` reports (`captures/4`) at 1440p with in-game brightness turned down — the reader reads them correctly (three near-centred plates the old pin-pop reader false-popped to 0 are really +1), so they pin the dark 1440p 6-plate regime; the session's recovery from the wrong models it once built is in `LockSessionTest` |
 | `hdr/` | the same 7-plate lock captured with **HDR on** — read by the tone-free `LatticeReader`, refused by `LockReader`. Unlike gamma, HDR is not an invertible LUT (the SDR capture clips where HDR does not), so it cannot be undone; it is read from the lock's own contrast instead |
 
 `3840x2160/front-plate-sweep/labels.txt`, `gamma/labels.txt` and `hdr/labels.txt` record how those

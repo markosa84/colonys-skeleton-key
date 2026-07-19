@@ -13,6 +13,7 @@ import org.junit.jupiter.params.provider.ValueSource;
 
 import io.github.markosa84.colonysskeletonkey.Stdout;
 import io.github.markosa84.colonysskeletonkey.solver.Connection;
+import io.github.markosa84.colonysskeletonkey.solver.Cost;
 import io.github.markosa84.colonysskeletonkey.solver.LockModel;
 import io.github.markosa84.colonysskeletonkey.solver.LockSolver;
 import io.github.markosa84.colonysskeletonkey.solver.Move;
@@ -22,6 +23,7 @@ import static io.github.markosa84.colonysskeletonkey.solver.Connection.Type.INVE
 import static io.github.markosa84.colonysskeletonkey.solver.Connection.Type.NORMAL;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -374,6 +376,95 @@ class LockSessionTest {
         // Live, a real lock is always openable, so a fully-learned model that will not solve means a
         // misread while probing - saved as evidence rather than shrugged at as a hard lock.
         assertTrue(game.dumps.contains("unsolvable-model"), game.dumps.toString());
+    }
+
+    /**
+     * The four dark-frame reports in {@code captures/4} (2560x1440, in-game brightness turned down):
+     * each learned a 6-plate model that will not open from the state the reader last saw, because a
+     * misread while probing corrupted one connection. Every model is exactly as its {@code f8-*.log}
+     * printed it. The recovery hinges on a single fact: since the real lock is openable, one row-edit
+     * must restore solvability - so the search must find a suspect plate to re-probe for every one of
+     * them. This pins the search directly against the real failures, no reader or frames required.
+     */
+    @Test
+    void recoveryFindsASuspectForEveryReportedDarkFrameModel() {
+        record Report(String name, int[] state, Connection[][] model) {}
+        List<Report> reports = List.of(
+                new Report("22:25", new int[] {1, -1, 1, 0, 0, 3}, rows(
+                        row(n(4), i(5)),
+                        row(i(0), i(3), n(4), i(5)),
+                        row(n(3)),
+                        row(n(2)),
+                        row(n(1), n(2), i(3)),
+                        row())),
+                new Report("23:04", new int[] {0, 1, 0, 2, 1, -3}, rows(
+                        row(n(2), n(4)),
+                        row(n(0)),
+                        row(i(3)),
+                        row(n(2), i(4), n(5)),
+                        row(n(2)),
+                        row(i(0)))),
+                new Report("23:06", new int[] {-3, 1, -1, 0, -1, -2}, rows(
+                        row(n(2), n(4)),
+                        row(n(0)),
+                        row(i(3)),
+                        row(n(2), i(4), n(5)),
+                        row(),
+                        row(i(0), i(2)))),
+                new Report("23:09", new int[] {-2, 2, 0, -2, 2, 2}, rows(
+                        row(n(1), i(2)),
+                        row(n(3)),
+                        row(n(0), i(1), i(4)),
+                        row(),
+                        row(n(0), i(2), i(5)),
+                        row(i(1), n(4)))));
+        for (Report r : reports) {
+            LockModel m = LockModel.of(r.state(), r.model());
+            assertNull(LockSolver.solve(m, r.state(), m.n() - 1, Cost.WALLCLOCK),
+                    r.name() + " must be unsolvable exactly as reported");
+            int suspect = -1;
+            for (int p = 0; p < m.n() && suspect < 0; p++) {
+                if (LockSession.singleEditRank(m, r.state(), p) != Integer.MAX_VALUE) {
+                    suspect = p;
+                }
+            }
+            assertTrue(suspect >= 0, r.name() + ": recovery must find a single-edit suspect to re-probe");
+        }
+    }
+
+    /**
+     * The whole recovery, end to end: a solvable lock whose reader flips one connection's sense while
+     * probing, then reads true. Plates 0 and 1 are a mutual pair - moving 0 drags 1 the same way,
+     * moving 1 drags 0 the opposite way - which the lock needs to open from a two-apart start. While
+     * the misread is on, plate 0's offset reads negated, so plate 1's probe learns its drag of plate 0
+     * as NORMAL: now the pair moves rigidly together and the two-apart lock can never centre - a
+     * genuinely unopenable learned model, exactly what a probing misread produces. The old code dumped
+     * {@code unsolvable-model} here; now the run clears the pair's misread plate, re-probes it once the
+     * misread has passed, learns the true opposite drag, and the lock comes open - the offline
+     * stand-in for the live 1440p failures, since no more live frames are coming.
+     */
+    @Test
+    void recoveryReprobesAMisreadConnectionAndOpensTheLock() {
+        LockModel truth = LockModel.of(new int[] {2, -2, 0, 0},
+                rows(row(n(1)), row(i(0)), row(), row()));
+        assertTrue(LockSolver.solve(truth) != null, "the truth lock must itself be openable");
+        FakeGame game = new FakeGame(truth, Skill.MASTER);
+        // Plate 0 reads negated until the probing that corrupts plate 1 is behind us. Discovery runs
+        // high plate to low, so plate 1 is probed at play 3; recovery re-probes it well after play 3.
+        game.misread = s -> {
+            if (game.plays > 3) {
+                return s;
+            }
+            int[] r = s.clone();
+            r[0] = -r[0];
+            return r;
+        };
+
+        String log = Stdout.capturing(() -> new LockSession(game, game, game).run());
+
+        assertTrue(game.opened(), "recovery must re-probe the misread plate and open the lock\n" + log);
+        assertTrue(log.contains("Re-probing plate"),
+                "the unsolvable model must trigger a recovery re-probe\n" + log);
     }
 
     /** The move landed but the frame after it did not read: report it, dump it, learn nothing. */

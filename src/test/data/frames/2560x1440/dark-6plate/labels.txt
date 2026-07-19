@@ -1,0 +1,21 @@
+# The four dark-frame reports from captures/4: a player at 2560x1440 with the in-game brightness
+# turned down - SDR, but darker than the gamma slider alone can make a frame. Each is an
+# `unsolvable-model` dump the tool saved on v1.3.0: the final state of a run that learned a
+# connection model which would not open, because a misread while probing corrupted one connection.
+# (cellar-a and cellar-b are the SAME lock, one F8 press apart, and learned two different unopenable
+# models - the clearest proof the misread was real.) The session now recovers from this instead of
+# giving up - see LockSession.tryRecoverUnsolvable / singleEditRank, pinned in LockSessionTest.
+#
+# The labels are the reader's own read of each frame, VERIFIED plate by plate against the frames.
+# Where the current reader disagreed with the old v1.3.0 read - three plates it reads as +1 that
+# v1.3.0's pin-pop read as centred 0 - the pins are FLUSH, not popped, so +1 is right. That is what
+# these fixtures pin: v1.3.0 FALSE-POPPED near-centred plates on these dark frames (forcing +1 to 0),
+# which is part of what produced the wrong models; removing pin-pop (the reader now confirms the goal
+# from a direct all-zero read, no pop) fixed it, and these frames hold the current reader to reading
+# this dark 1440p 6-plate regime correctly. No key protocol here - a dump is a single settled frame,
+# so the label is a reading, like the census's step-0 frames.
+
+door.png     = [1, -1, 1, 1, 0, 3]
+cellar-a.png = [0, 1, 1, 2, 1, -3]
+cellar-b.png = [-3, 1, -1, 0, -1, -2]
+attic.png    = [-2, 2, 1, -2, 2, 2]

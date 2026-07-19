@@ -178,6 +178,26 @@ final class FrameCorpus {
     }
 
     /**
+     * The four dark 2560x1440 6-plate reports from {@code captures/4}: {@code (frame, viewport,
+     * offsets)}. A player at 1440p with the in-game brightness turned down hit locks the tool would
+     * not open - it learned a connection model that would not solve, because a misread while probing
+     * corrupted one connection. These are the settled dumps of those runs; two are the same lock a run
+     * apart. Their labels are read off the frame and verified plate by plate (see
+     * {@code 2560x1440/dark-6plate/labels.txt}) - notably, three near-centred plates the old pin-pop
+     * reader FALSE-POPPED to 0 are really +1, which is part of what produced the wrong models. They
+     * pin that the current (pop-free) reader reads this dark regime correctly; the session's own
+     * recovery from the wrong model it built lives in {@code LockSessionTest}.
+     */
+    static Stream<Arguments> darkFrames() {
+        Map<String, int[]> labels = labels("2560x1440/dark-6plate");
+        Viewport viewport = new Viewport(2560, 1440);
+        List<Arguments> frames = new ArrayList<>();
+        labels.forEach((name, offsets) ->
+                frames.add(Arguments.of("2560x1440/dark-6plate/" + name, viewport, offsets)));
+        return frames.stream();
+    }
+
+    /**
      * The front-plate sweep at every one of the 19 display modes: {@code (frame, viewport, offsets)}.
      * One 5-plate lock, one key protocol, replayed from a fresh R at each mode - so the states read
      * once at 4K are every mode's states too, which is the claim {@code labels.txt} records and this
@@ -202,6 +222,7 @@ final class FrameCorpus {
                 frames.add(Arguments.of(a.get()[0], Viewport.REFERENCE, a.get()[1])));
         gammaFrames().forEach(frames::add);
         hdrFrames().forEach(frames::add);
+        darkFrames().forEach(frames::add);
         sweepFrames().forEach(frames::add);
         return frames.stream();
     }

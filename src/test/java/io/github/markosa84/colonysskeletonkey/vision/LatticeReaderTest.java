@@ -85,6 +85,24 @@ class LatticeReaderTest {
         assertArrayEquals(expected, reader.readState(img, expected.length), frame + ": offsets");
     }
 
+    /**
+     * The four dark 2560x1440 6-plate reports from {@code captures/4}: a player at 1440p with the
+     * in-game brightness turned down. On v1.3.0 these produced {@code unsolvable-model} give-ups,
+     * because a misread while probing corrupted a connection. The reader reads all four correctly now
+     * - including three near-centred plates the old pin-pop reader FALSE-POPPED to 0 that are really
+     * +1 (verified plate by plate against the frames; see the group's {@code labels.txt}). Removing
+     * pin-pop fixed that source; this holds the current reader to reading the dark 1440p regime right,
+     * and the session's recovery from the wrong models it once built is pinned in {@code LockSessionTest}.
+     */
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("darkFrames")
+    void readsTheDarkFrameReports(String frame, Viewport viewport, int[] expected) {
+        BufferedImage img = TestFrames.load(frame);
+        LatticeReader reader = new LatticeReader(viewport, Tone.estimate(img, viewport));
+        assertEquals(expected.length, reader.detectPlateCount(img), frame + ": plate count");
+        assertArrayEquals(expected, reader.readState(img, expected.length), frame + ": offsets");
+    }
+
     /** The front-plate sweep at every one of the 19 display modes, 1280x720 through 4K. */
     @ParameterizedTest(name = "{0}")
     @MethodSource("sweepFrames")
@@ -205,6 +223,10 @@ class LatticeReaderTest {
 
     static Stream<Arguments> hdrFrames() {
         return FrameCorpus.hdrFrames();
+    }
+
+    static Stream<Arguments> darkFrames() {
+        return FrameCorpus.darkFrames();
     }
 
     static Stream<Arguments> sweepFrames() {
