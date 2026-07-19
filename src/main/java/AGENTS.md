@@ -3,11 +3,12 @@
 - **There are two readers behind `LockAnalyzer`, and `LatticeReader` is the default.** It reads the
   lock from **ratios of the lock's own contrast** (tone-free), matches `LockReader` on every labelled
   frame, and additionally reads HDR. `LockReader` is the pixel-calibrated reference, kept behind
-  `--reader=legacy` (and for `LockReader.luminance` and the reference constants `LatticeReader`
-  borrows). Both share the measured geometry in `FanGeometry`. If you touch photometry, change it in
-  the reader that owns it; if you touch geometry, it lives in `FanGeometry` and both readers move
-  together. **Do not delete `LockReader`** — it is the calibration reference and the corpus gate for
-  the measured constants everything else is derived from.
+  `--reader=legacy`. Both share the measured geometry in `FanGeometry` — including the hole walk and
+  the skip window — and the `luminance` primitive in `Pixels`, so **neither reader depends on the
+  other** (`LatticeReader` used to borrow both from `LockReader`; it no longer does). If you touch
+  photometry, change it in the reader that owns it; if you touch geometry, it lives in `FanGeometry`
+  and both readers move together. **Do not delete `LockReader`** — it is the calibration reference and
+  the corpus gate for the measured constants everything else is derived from.
 
 - **Both readers have a regression gate — run it after any change:** `gradlew test` (wired into
   `check`/`build`) replays every labelled frame in `src/test/data/frames/` through **both**

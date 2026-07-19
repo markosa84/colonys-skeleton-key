@@ -116,7 +116,7 @@ class ToneTest {
      */
     @Test
     void aGammaBetweenTwoMeasuredOnesIsInterpolated() {
-        int ink = LockReader.luminance(grey(66)); // between the 2.4 member (58) and the 2.7 one (74)
+        int ink = Pixels.luminance(grey(66)); // between the 2.4 member (58) and the 2.7 one (74)
 
         Tone between = Tone.estimate(panel(ink, 255), Viewport.REFERENCE);
         Tone darker = Tone.estimate(TestFrames.load("gamma/g-2.4.png"), Viewport.REFERENCE);
@@ -140,7 +140,7 @@ class ToneTest {
      */
     @Test
     void aReadingPastTheTopOfTheSliderClampsToItRatherThanExtrapolating() {
-        Tone past = Tone.estimate(panel(LockReader.luminance(grey(140)), 255), Viewport.REFERENCE);
+        Tone past = Tone.estimate(panel(Pixels.luminance(grey(140)), 255), Viewport.REFERENCE);
         Tone top = Tone.estimate(TestFrames.load("gamma/g-3.2/step-0.png"), Viewport.REFERENCE);
 
         for (int v = 0; v < 256; v++) {
@@ -176,8 +176,8 @@ class ToneTest {
      */
     @Test
     void aFrameDarkerThanTheSliderCanMakeItIsCalledOut() {
-        int ink = LockReader.luminance(grey(13));
-        int white = LockReader.luminance(grey(184)); // the family says ~254 at this ink
+        int ink = Pixels.luminance(grey(13));
+        int white = Pixels.luminance(grey(184)); // the family says ~254 at this ink
 
         Tone tone = Tone.estimate(panel(ink, white), Viewport.REFERENCE);
 

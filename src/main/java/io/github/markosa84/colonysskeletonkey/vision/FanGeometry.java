@@ -4,6 +4,7 @@ import java.awt.Graphics2D;
 import java.awt.Rectangle;
 import java.awt.RenderingHints;
 import java.awt.image.BufferedImage;
+import java.util.List;
 
 import io.github.markosa84.colonysskeletonkey.solver.LockModel;
 
@@ -85,9 +86,16 @@ public final class FanGeometry {
      */
     private static final double STEP_MIN = 36, STEP_MAX = 62, STEP_IDEAL = 48;
 
-    /** Accepted hole blob geometry. Measured 15-42 wide, 14-34 tall. */
+    /**
+     * A double hole spacing, which {@link #walk} accepts to repair a single undetected hole mid-row.
+     * The single-step window itself is {@link #STEP_MIN}/{@link #STEP_MAX}/{@link #STEP_IDEAL}.
+     */
+    private static final double SKIP_MIN = 80, SKIP_MAX = 118, SKIP_IDEAL = 96;
+
+    /** Accepted hole blob geometry. Measured 15-42 wide, 14-34 tall, 150-950 px in area. */
     private static final int HOLE_MIN_W = 15, HOLE_MAX_W = 42;
     private static final int HOLE_MIN_H = 14, HOLE_MAX_H = 34;
+    private static final int HOLE_MIN_AREA = 150, HOLE_MAX_AREA = 950;
 
     /** Dark holes per plate: the 7 holes minus the one the pin occupies. */
     public static final int HOLES_PER_PLATE = 2 * LockModel.MAX_OFFSET;
@@ -101,7 +109,9 @@ public final class FanGeometry {
     final int rowMaxDx, rowMaxDy;
     final int cropPadX, cropPadY;
     final double stepMin, stepMax, stepIdeal;
+    final double skipMin, skipMax, skipIdeal;
     final double holeMinW, holeMaxW, holeMinH, holeMaxH;
+    final double holeMinArea, holeMaxArea;
 
     /** The fan as it lands in a game view of this size - the measured way to know where the lock is. */
     public FanGeometry(Viewport viewport) {
@@ -132,10 +142,15 @@ public final class FanGeometry {
         stepMin = mapping.len(STEP_MIN);
         stepMax = mapping.len(STEP_MAX);
         stepIdeal = mapping.len(STEP_IDEAL);
+        skipMin = mapping.len(SKIP_MIN);
+        skipMax = mapping.len(SKIP_MAX);
+        skipIdeal = mapping.len(SKIP_IDEAL);
         holeMinW = mapping.len(HOLE_MIN_W);
         holeMaxW = mapping.len(HOLE_MAX_W);
         holeMinH = mapping.len(HOLE_MIN_H);
         holeMaxH = mapping.len(HOLE_MAX_H);
+        holeMinArea = mapping.area(HOLE_MIN_AREA);
+        holeMaxArea = mapping.area(HOLE_MAX_AREA);
     }
 
     /** Where this fan's reference coordinates land. */
@@ -203,6 +218,52 @@ public final class FanGeometry {
             out[i] = LockModel.MAX_OFFSET - i * 0.5;
         }
         return out;
+    }
+
+    /**
+     * Walks the hole lattice outward from a pin at {@code px} in direction {@code dir}, hopping from
+     * hole to hole one spacing at a time, and returns how many hole slots it crossed (out of six).
+     *
+     * <p>A walk rather than a rigid lattice fit on purpose: perspective makes the spacing vary
+     * 41-54px along a single row, so no fixed lattice fits all seven slots at once - its slots drift
+     * off the holes by the third step. Stepping hole to hole lets the row bend as the camera bends
+     * it. Blobs that do not sit a plausible step from the previous one are ignored, which is what
+     * rejects shadows. With {@code allowSkip} a double step is also accepted, bridging a single
+     * undetected hole - callers ask for that only after the exact walk failed to add up to six,
+     * because on a fully detected row a skip can only overshoot and "bridge" a hole that was never
+     * missing. (An arch-gap shadow 2.25 spacings past the end of a row once read a healthy 6-plate
+     * lock UNKNOWN exactly that way; see {@code 6p-gap-shadow} in the test frames.)
+     *
+     * <p>Both readers share this; the numbers it walks on ({@link #stepMin}/{@link #stepMax} and the
+     * skip window) are measured geometry, so they live here with the rest of the fan.
+     */
+    int walk(List<Double> rowHoles, double px, int dir, boolean allowSkip) {
+        double cur = px;
+        int slots = 0;
+        while (slots < HOLES_PER_PLATE) {
+            double bestX = 0, bestErr = Double.MAX_VALUE;
+            int bestSlots = 0;
+            for (double x : rowHoles) {
+                double d = (x - cur) * dir;
+                int step = (d >= stepMin && d <= stepMax) ? 1
+                        : (allowSkip && d >= skipMin && d <= skipMax) ? 2 : 0;
+                if (step == 0) {
+                    continue;
+                }
+                double err = Math.abs(d - (step == 1 ? stepIdeal : skipIdeal));
+                if (err < bestErr) {
+                    bestErr = err;
+                    bestX = x;
+                    bestSlots = step;
+                }
+            }
+            if (bestSlots == 0) {
+                break;
+            }
+            slots += bestSlots;
+            cur = bestX;
+        }
+        return slots;
     }
 
     /**

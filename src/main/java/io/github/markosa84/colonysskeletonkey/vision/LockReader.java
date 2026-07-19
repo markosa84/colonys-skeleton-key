@@ -112,8 +112,6 @@ public final class LockReader implements LockAnalyzer {
 
     /** Luminance below which a pixel is a hole candidate. */
     private static final int HOLE_DARK_MAX = 105;
-    /** Accepted hole blob area (px). Measured 150-950; the width/height bounds are in FanGeometry. */
-    static final int HOLE_MIN_AREA = 150, HOLE_MAX_AREA = 950;
     /**
      * A real hole shows the near-black void behind the plate; the plate's own shadows (in the bent
      * end-tab, or the inter-plate gap) bottom out around 76. Measured: holes 0-50, shadows 76-96.
@@ -128,12 +126,6 @@ public final class LockReader implements LockAnalyzer {
     /** Second guard on the same distinction. Measured: holes 19-82, shadows 92-96. */
     private static final int HOLE_MAX_MEAN_LUM = 88;
 
-    /**
-     * A double hole spacing, which {@link #walk} accepts to repair a single undetected hole mid-row.
-     * The single-step window itself is geometry ({@code FanGeometry.stepMin/Max/Ideal}).
-     */
-    static final double SKIP_MIN = 80, SKIP_MAX = 118, SKIP_IDEAL = 96;
-
     // --- The same quantities, mapped onto the actual viewport ---
 
     /** Where the lock is. Measured, shared with every other reader, and never fitted to a screen. */
@@ -141,8 +133,6 @@ public final class LockReader implements LockAnalyzer {
     private final double clusterRadius;
     private final double pinMinPixels, pinMaxPixels;
     private final double matchMaxDist;
-    private final double holeMinArea, holeMaxArea;
-    private final double skipMin, skipMax, skipIdeal;
 
     /**
      * The game's gamma, undone on the way in. Every colour and luminance constant above was fitted
@@ -170,11 +160,6 @@ public final class LockReader implements LockAnalyzer {
         pinMinPixels = mapping.area(PIN_MIN_PIXELS);
         pinMaxPixels = mapping.area(PIN_MAX_PIXELS);
         matchMaxDist = mapping.len(MATCH_MAX_DIST);
-        holeMinArea = mapping.area(HOLE_MIN_AREA);
-        holeMaxArea = mapping.area(HOLE_MAX_AREA);
-        skipMin = mapping.len(SKIP_MIN);
-        skipMax = mapping.len(SKIP_MAX);
-        skipIdeal = mapping.len(SKIP_IDEAL);
     }
 
     /** A detected pin: screen centroid and blob size (px); the pop threshold lives in the reader. */
@@ -346,11 +331,11 @@ public final class LockReader implements LockAnalyzer {
 
         int[] out = new int[n];
         for (int i = 0; i < n; i++) {
-            int left = walk(rows.get(i), rowPin[i][0], -1, false);
-            int right = walk(rows.get(i), rowPin[i][0], +1, false);
+            int left = geo.walk(rows.get(i), rowPin[i][0], -1, false);
+            int right = geo.walk(rows.get(i), rowPin[i][0], +1, false);
             if (left + right != HOLES_PER_PLATE) {
-                left = walk(rows.get(i), rowPin[i][0], -1, true);
-                right = walk(rows.get(i), rowPin[i][0], +1, true);
+                left = geo.walk(rows.get(i), rowPin[i][0], -1, true);
+                right = geo.walk(rows.get(i), rowPin[i][0], +1, true);
             }
             out[i] = (left + right == HOLES_PER_PLATE) ? left - LockModel.MAX_OFFSET : UNKNOWN;
         }
@@ -423,41 +408,6 @@ public final class LockReader implements LockAnalyzer {
     }
 
     /**
-     * Walks the hole lattice outward from a pin at {@code px} in direction {@code dir}, hopping from
-     * hole to hole one spacing at a time, and returns how many hole slots it crossed. Blobs that do
-     * not sit a plausible step away from the previous one are ignored, which is what rejects
-     * shadows. With {@code allowSkip} a double step is also accepted, bridging a single undetected
-     * hole - {@link #readState} asks for that only after the exact walk failed to add up, because
-     * on a fully detected row a skip can only overshoot: it "bridges" a hole that was never
-     * missing. (An arch-gap shadow 2.25 spacings past the end of a row once read a healthy 6-plate
-     * lock UNKNOWN exactly that way; see {@code 6p-gap-shadow} in the test frames.)
-     */
-    private int walk(List<Double> rowHoles, double px, int dir, boolean allowSkip) {
-        double cur = px;
-        int slots = 0;
-        while (slots < HOLES_PER_PLATE) {
-            double bestX = 0, bestErr = Double.MAX_VALUE;
-            int bestSlots = 0;
-            for (double x : rowHoles) {
-                double d = (x - cur) * dir;
-                int step = (d >= geo.stepMin && d <= geo.stepMax) ? 1
-                        : (allowSkip && d >= skipMin && d <= skipMax) ? 2 : 0;
-                if (step == 0) continue;
-                double err = Math.abs(d - (step == 1 ? geo.stepIdeal : skipIdeal));
-                if (err < bestErr) {
-                    bestErr = err;
-                    bestX = x;
-                    bestSlots = step;
-                }
-            }
-            if (bestSlots == 0) break;
-            slots += bestSlots;
-            cur = bestX;
-        }
-        return slots;
-    }
-
-    /**
      * Connected dark blobs in a rotated fan crop that pass the hole tests (size, shape and a
      * near-black interior). Returns their centroids in rotated-frame coordinates, as {@code {x, y}}.
      */
@@ -467,7 +417,7 @@ public final class LockReader implements LockAnalyzer {
         int[] lum = new int[w * h];
         for (int y = 0; y < h; y++) {
             for (int x = 0; x < w; x++) {
-                int l = luminance(tone.map(crop.getRGB(x, y)));
+                int l = Pixels.luminance(tone.map(crop.getRGB(x, y)));
                 lum[y * w + x] = l;
                 dark[y * w + x] = l < HOLE_DARK_MAX;
             }
@@ -507,7 +457,7 @@ public final class LockReader implements LockAnalyzer {
                 }
             }
             int bw = maxX - minX + 1, bh = maxY - minY + 1;
-            if (area < holeMinArea || area > holeMaxArea
+            if (area < geo.holeMinArea || area > geo.holeMaxArea
                     || bw < geo.holeMinW || bw > geo.holeMaxW
                     || bh < geo.holeMinH || bh > geo.holeMaxH
                     || minLum > HOLE_MAX_MIN_LUM || sumLum / area > HOLE_MAX_MEAN_LUM) {
@@ -596,13 +546,5 @@ public final class LockReader implements LockAnalyzer {
         int g = (argb >> 8) & 0xFF;
         int b = argb & 0xFF;
         return (r - b) >= 45 && (r - g) >= 12 && (g - b) >= 8 && r >= 130 && b <= 140 && g >= 90;
-    }
-
-    /** Rec. 601 luma of a packed ARGB pixel. */
-    static int luminance(int argb) {
-        int r = (argb >> 16) & 0xFF;
-        int g = (argb >> 8) & 0xFF;
-        int b = argb & 0xFF;
-        return (int) (0.299 * r + 0.587 * g + 0.114 * b);
     }
 }

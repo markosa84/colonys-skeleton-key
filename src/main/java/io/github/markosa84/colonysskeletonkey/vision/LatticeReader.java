@@ -52,8 +52,9 @@ import io.github.markosa84.colonysskeletonkey.solver.LockModel;
  * plate counts, 865/865 offsets, across the 53-frame 4K census, the whole gamma slider and all 19
  * resolution sweep modes - and on top of that it reads the reporters' HDR dumps, where
  * {@code LockReader} returns -1 and the player is told "no lock detected". {@code LockReader} is kept
- * as the reference (and for its {@code luminance} helper and the constants this class borrows), behind
- * {@code --reader=legacy}.
+ * purely as the pixel-calibrated reference and corpus gate, behind {@code --reader=legacy}; the
+ * primitives both readers share (the hole walk, the skip window, {@code luminance}) live in
+ * {@link FanGeometry} and {@link Pixels}, so neither reader depends on the other.
  *
  * <h2>The pin is the gap, not the brass</h2>
  * The pin never moves; the plate slides underneath it. So a row's six visible holes always sit on a
@@ -187,8 +188,8 @@ public final class LatticeReader implements LockAnalyzer {
         // Areas are the one thing that DOES scale with the view, and quadratically: a hole is a
         // hole, but it is fewer pixels on a smaller screen. The slack is because these blobs are traced
         // at a different threshold than the one the bounds were measured at - see SHAPE_SLACK.
-        this.holeMinArea = mapping.area(LockReader.HOLE_MIN_AREA) / (SHAPE_SLACK * SHAPE_SLACK);
-        this.holeMaxArea = mapping.area(LockReader.HOLE_MAX_AREA) * SHAPE_SLACK * SHAPE_SLACK;
+        this.holeMinArea = geo.holeMinArea / (SHAPE_SLACK * SHAPE_SLACK);
+        this.holeMaxArea = geo.holeMaxArea * SHAPE_SLACK * SHAPE_SLACK;
         this.holeMinW = geo.holeMinW / SHAPE_SLACK;
         this.holeMaxW = geo.holeMaxW * SHAPE_SLACK;
         this.holeMinH = geo.holeMinH / SHAPE_SLACK;
@@ -338,7 +339,7 @@ public final class LatticeReader implements LockAnalyzer {
             for (int y = 0; y < h; y++) {
                 for (int x = 0; x < w; x++) {
                     int argb = rotated.getRGB(x, y);
-                    int l = LockReader.luminance(correct ? tone.map(argb) : argb);
+                    int l = Pixels.luminance(correct ? tone.map(argb) : argb);
                     lum[y * w + x] = l;
                     hist[l]++;
                 }
@@ -509,11 +510,11 @@ public final class LatticeReader implements LockAnalyzer {
                     onRow.add(hole[0]);
                 }
             }
-            int left = walk(onRow, rowPin[0], -1, false);
-            int right = walk(onRow, rowPin[0], +1, false);
+            int left = geo.walk(onRow, rowPin[0], -1, false);
+            int right = geo.walk(onRow, rowPin[0], +1, false);
             if (left + right != HOLES) {
-                left = walk(onRow, rowPin[0], -1, true);
-                right = walk(onRow, rowPin[0], +1, true);
+                left = geo.walk(onRow, rowPin[0], -1, true);
+                right = geo.walk(onRow, rowPin[0], +1, true);
             }
             int walked = left + right;
             double own = metal(n, i);
@@ -578,48 +579,6 @@ public final class LatticeReader implements LockAnalyzer {
             Arrays.sort(slice);
             return slice[n / 2];
         }
-    }
-
-    /**
-     * Walks the hole lattice outward from the pin, hopping hole to hole one spacing at a time, and
-     * returns how many slots it crossed.
-     *
-     * <p>This is {@link LockReader}'s walk, and it is a walk rather than a lattice fit for a reason a
-     * rewrite here rediscovered the hard way: perspective makes the spacing vary <b>41-54px along a
-     * single row</b>, so no rigid lattice fits all seven slots at once - its slots drift off the holes
-     * by the third step and every margin collapses. Stepping hole to hole lets the row bend as the
-     * camera makes it bend.
-     */
-    private int walk(List<Double> rowHoles, double px, int dir, boolean allowSkip) {
-        double cur = px;
-        int slots = 0;
-        double skipMin = geo.mapping().len(LockReader.SKIP_MIN);
-        double skipMax = geo.mapping().len(LockReader.SKIP_MAX);
-        double skipIdeal = geo.mapping().len(LockReader.SKIP_IDEAL);
-        while (slots < HOLES) {
-            double bestX = 0, bestErr = Double.MAX_VALUE;
-            int bestSlots = 0;
-            for (double x : rowHoles) {
-                double d = (x - cur) * dir;
-                int step = (d >= geo.stepMin && d <= geo.stepMax) ? 1
-                        : (allowSkip && d >= skipMin && d <= skipMax) ? 2 : 0;
-                if (step == 0) {
-                    continue;
-                }
-                double err = Math.abs(d - (step == 1 ? geo.stepIdeal : skipIdeal));
-                if (err < bestErr) {
-                    bestErr = err;
-                    bestX = x;
-                    bestSlots = step;
-                }
-            }
-            if (bestSlots == 0) {
-                break;
-            }
-            slots += bestSlots;
-            cur = bestX;
-        }
-        return slots;
     }
 
     /** The luminance the given fraction of the crop's pixels fall below. */

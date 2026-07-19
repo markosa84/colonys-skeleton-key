@@ -190,7 +190,7 @@ public final class GameScreen {
         long hash = 0xcbf29ce484222325L; // FNV-1a over the thresholded glyph pixels
         for (int y = 0; y < box.getHeight(); y++) {
             for (int x = 0; x < box.getWidth(); x++) {
-                hash ^= LockReader.luminance(box.getRGB(x, y)) < dark ? 1 : 0;
+                hash ^= Pixels.luminance(box.getRGB(x, y)) < dark ? 1 : 0;
                 hash *= 0x100000001b3L;
             }
         }
