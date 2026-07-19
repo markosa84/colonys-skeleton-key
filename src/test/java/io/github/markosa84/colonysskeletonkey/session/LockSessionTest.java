@@ -236,7 +236,10 @@ class LockSessionTest {
                 rows(row(), row(n(0)), row(), row(i(2))));
         FakeGame game = new FakeGame(truth, Skill.MASTER);
         game.hiddenPlate = 1;
-        game.hideWhen = s -> s[3] == 0; // plate 3 sitting centred covers plate 1's row
+        // Plate 2 sitting off-centre shadows its neighbour plate 1's row - and clears once every
+        // plate is home, so the all-zero goal is directly readable (a centred plate no longer hides
+        // anything, which is what the pin-pop used to guarantee and the 1280x720 floor now does).
+        game.hideWhen = s -> s[2] != 0;
 
         new LockSession(game, game, game).run();
 
@@ -252,12 +255,41 @@ class LockSessionTest {
                 rows(row(), row(n(0)), row(), row()));
         FakeGame game = new FakeGame(truth, Skill.MASTER);
         game.hiddenPlate = 1;
-        game.hideWhen = s -> s[3] == 0; // hidden in the very configuration the session starts in
+        // A cover over plate 1's row in the resting frame that clears the moment anything moves - the
+        // session cannot read it where it sits, so it must nudge a visible plate to shift the geometry
+        // before it can even start. Every later frame, including the all-zero goal, reads directly.
+        game.hideWhen = s -> java.util.Arrays.equals(s, truth.start());
 
         new LockSession(game, game, game).run();
 
         assertTrue(game.opened());
         assertEquals(0, game.strains);
+    }
+
+    /**
+     * A row hidden in the all-zero goal configuration <b>itself</b> can never be directly confirmed
+     * open. The pin-pop used to read a centred plate whatever covered its holes; with the pop gone
+     * the goal is confirmed only from a fresh all-zero hole read, so the session model-fills its way
+     * to the goal, finds the direct read still short a row, nudges, re-solves, and comes back to the
+     * same place - a no-progress loop. Rather than hang (or spend picks), the livelock guard stops it
+     * and saves the frame. Above the 1280x720 floor a centred plate no longer hides anything, so this
+     * is the accepted residual of dropping the pop, pinned here so the give-up stays graceful.
+     */
+    @Test
+    @Timeout(value = 15, unit = TimeUnit.SECONDS)
+    void aRowHiddenAtTheGoalItselfIsGivenUpOnGracefullyNotHung() {
+        LockModel truth = LockModel.of(new int[] {1, -1, 1, 0},
+                rows(row(), row(n(0)), row(), row()));
+        FakeGame game = new FakeGame(truth, Skill.MASTER);
+        game.hiddenPlate = 1;
+        game.hideWhen = s -> s[3] == 0; // plate 1 hidden whenever plate 3 is centred - as it is at goal
+
+        String log = Stdout.capturing(() -> new LockSession(game, game, game).run());
+
+        assertFalse(game.opened(), "a plate invisible at the all-zero goal can never be confirmed open");
+        assertTrue(game.dumps.contains("no-progress"), game.dumps.toString());
+        assertTrue(log.contains("returning to the same configuration"), log);
+        assertEquals(0, game.strains, "the give-up costs no strain - it is a read limit, not a hard lock");
     }
 
     /**
@@ -344,23 +376,6 @@ class LockSessionTest {
         assertTrue(game.dumps.contains("unsolvable-model"), game.dumps.toString());
     }
 
-    /**
-     * "No plate reads a non-zero offset" is <b>not</b> "the lock opened" - it is also true of a
-     * frame nothing could be read in. Only the pin pops, which are the game's own exact signal, may
-     * declare a lock open. Here the hole rows claim all-centred while a pin says otherwise: the
-     * session must disbelieve the rows and go back for another look.
-     */
-    @Test
-    void onlyThePinPopsMayDeclareTheLockOpen() {
-        PinVetoGame game = new PinVetoGame(4, 1); // plate 1's pin has not popped, whatever the rows say
-
-        String log = Stdout.capturing(() -> new LockSession(game, game, game).run());
-
-        assertTrue(log.contains("Lock solved"), log);
-        assertEquals(2, game.centeredReads, "the first all-zero reading was checked and rejected");
-        assertEquals(0, game.plays, "and nothing was typed at a lock that was already open");
-    }
-
     /** The move landed but the frame after it did not read: report it, dump it, learn nothing. */
     @Test
     void anUnreadableFrameMidRunIsReportedAndDumped() {
@@ -378,7 +393,8 @@ class LockSessionTest {
 
     /**
      * The winning move lands and the minigame starts closing, so the next frame reads nothing. That
-     * is a solved lock, not a failure - and the pins, which need no hole rows, say so.
+     * is a solved lock, not a failure: the move the plan predicted would reach the goal is what
+     * landed, so the run concludes solved without reading the frame that came after.
      */
     @Test
     void aLockThatGoesUnreadableAsItOpensIsStillReportedSolved() {
@@ -498,62 +514,6 @@ class LockSessionTest {
     }
 
     /**
-     * A lock whose hole rows read all-centred while one pin has not popped. The rows are lying (or
-     * the frame is), and the pop is the truth; on the second look the pin agrees and the lock is
-     * open. Nothing here can be moved, so any key the session sends is a bug.
-     */
-    private static final class PinVetoGame implements LockView, MoveExecutor, CursorKeys {
-        private final int n;
-        private final int unpopped;
-        int centeredReads;
-        int plays;
-
-        PinVetoGame(int n, int unpopped) {
-            this.n = n;
-            this.unpopped = unpopped;
-        }
-
-        @Override
-        public int detectPlateCount() {
-            return n;
-        }
-
-        @Override
-        public boolean[] readCentered(int n) {
-            boolean[] popped = new boolean[n];
-            java.util.Arrays.fill(popped, true);
-            if (centeredReads++ == 0) {
-                popped[unpopped] = false; // the first look: this plate is not centred at all
-            }
-            return popped;
-        }
-
-        @Override
-        public void dumpFrame(String tag) {
-        }
-
-        @Override
-        public Observation play(int n, int[] cur, Move move) {
-            plays++;
-            return new Observation(Outcome.UNCHANGED, cur.clone(), false);
-        }
-
-        @Override
-        public int[] settle(int n) {
-            return new int[n]; // the hole rows say every plate is centred
-        }
-
-        @Override
-        public void endCursor(int n) {
-        }
-
-        @Override
-        public int cursor() {
-            return 0;
-        }
-    }
-
-    /**
      * A lock the reader cannot make sense of: it reports whatever plate count it was given and
      * refuses to read a state. Nothing here is playable, which is the point - the session must
      * bail out before it types anything.
@@ -571,11 +531,6 @@ class LockSessionTest {
         @Override
         public int detectPlateCount() {
             return plates;
-        }
-
-        @Override
-        public boolean[] readCentered(int n) {
-            return new boolean[n];
         }
 
         @Override
@@ -632,11 +587,6 @@ class LockSessionTest {
         }
 
         @Override
-        public boolean[] readCentered(int n) {
-            return new boolean[n];
-        }
-
-        @Override
         public void dumpFrame(String tag) {
         }
 
@@ -679,11 +629,6 @@ class LockSessionTest {
         @Override
         public int detectPlateCount() {
             return n;
-        }
-
-        @Override
-        public boolean[] readCentered(int n) {
-            return new boolean[n];
         }
 
         @Override

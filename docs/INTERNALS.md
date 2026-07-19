@@ -44,8 +44,9 @@ connections, leaving nothing to trade — and that agreement is now a regression
   reader was calibrated at **3840×2160 (4K)**; at any other resolution the 4K calibration is
   scaled to your screen at startup (an aspect-fit: the game's 16:9 view stays centred, wider
   screens add world at the sides, narrower ones above and below). The scaling is validated by
-  live sweeps at 23 display modes from 800×600 up, across 16:9, 16:10, 4:3 and 5:4; if anything
-  misreads anyway, the failure frames land in `captures/`.
+  live sweeps at 19 display modes from **1280×720** up, across 16:9, 16:10, 4:3 and 5:4. **1280×720
+  is a hard floor**: below it the tool declines the lock rather than risk a misread, so play at
+  720p or higher. If anything misreads anyway, the failure frames land in `captures/`.
 - The build and the test suite run on any OS — no game and no display needed.
 
 ## Building and testing
@@ -64,8 +65,8 @@ through the seams that stand in for `java.awt.Robot` (which cannot exist in a he
 [`src/test/data/frames`](../src/test/data/frames/README.md) — the reader's whole calibration: a
 34-frame 4K census (every frame must decode to its exact known plate count and offsets — the
 constants are *fitted* to these), a 21-frame census of a 7-plate lock, a regression frame from the
-one live misread ever diagnosed, and a 161-frame sweep of one lock at 23 display modes that pins the
-resolution scaling. Change `LockReader` and you answer to all 217. They are shrunk to the region the
+one live misread ever diagnosed, and a 133-frame sweep of one lock at 19 display modes that pins the
+resolution scaling. Change `LockReader` and you answer to all 189. They are shrunk to the region the
 reader samples (see that directory's README), and if the directory is missing the frame-driven tests
 **fail** rather than skip — a silent skip would switch the calibration off and still look green.
 `captures/` collects failure frames automatically if you hit a misread of your own.
@@ -86,7 +87,8 @@ everything it knew, learns the plate connections by experiment, and opens the lo
 resetting it**. Probing is itself a sequence of legal moves, so wherever it finishes is simply a
 closer state to solve from.
 
-Play at any resolution, windowed or borderless, on any monitor. Each F8 measures the rectangle the
+Play at any resolution from **1280×720** up (the tool declines smaller locks rather than misread
+them), windowed or borderless, on any monitor. Each F8 measures the rectangle the
 game is actually drawing into (the focused window's client area) and scales the 4K calibration onto
 it, so the tool does not care whether the game fills your screen.
 
@@ -112,8 +114,10 @@ nothing is guessed. And when the panel is not where it should be, the tool says 
 nothing, rather than inventing a correction.
 
 The one thing it will tell you about is a picture *darker than the gamma slider alone can make it* —
-that means a second setting is dimming things (the game's brightness offset, HDR, a display profile),
-and the correction may not be enough. It says so in the `.txt` beside the dump.
+most often **HDR**. Gamma correction cannot describe that, so the tool does not lean on it there: it
+reads the lock from its own light and shadow — how much darker a hole is than the plate around it —
+which needs no brightness reference at all, and so an HDR screenshot reads too. It still says so in
+the `.txt` beside the dump, and it will never trust a correction it can see does not fit.
 
 ### When it says "No 4-7 plate lock detected"
 
@@ -162,8 +166,8 @@ and the old title-based gate would have typed `W/A/S/D` into it. Override with
 > [`src/test/data/frames/`](src/test/data/frames/) — plate counts for 4-, 5-, 6- and 7-plate locks,
 > and every plate's exact offset across eight slide sequences; run it yourself with `./gradlew test`
 > (no game needed). F8 opens a live 5-plate chest lock in ~2.9 s with no strains. Non-4K resolutions
-> are validated by live sweeps at all 23 of the dev machine's display modes (one 5-plate lock,
-> 800×600 through 4K). **7-plate locks now read correctly** — their fan geometry was extrapolated
+> are validated by live sweeps at all 19 of the dev machine's display modes at or above the
+> **1280×720 floor** (one 5-plate lock, 1280×720 through 4K). **7-plate locks now read correctly** — their fan geometry was extrapolated
 > and needed no correction when a real one was finally found — but, like 4- and 6-plate locks, they
 > are labelled at 4K only. See [`CLAUDE.md`](CLAUDE.md).
 
@@ -182,7 +186,7 @@ obvious turned out to be wrong.
 | `readState()` on either | 6 ms | **8 ms** | 24 ms |
 
 The screenshot dominates, not the image processing. Grabbing only the lock's box gives identical
-`readState` and `readCentered` results and makes a poll ~30 ms instead of ~93 ms. (The box was
+`readState` results and makes a poll ~30 ms instead of ~93 ms. (The box was
 later widened from 1200×1000 to 1300×1120 to guarantee a safety belt around everything the reader
 samples; the enlargement measured cost-free — the grab's fixed overhead dominates, and
 `CaptureBoxTest` proves the containment for every plate count at every supported resolution.)
@@ -302,11 +306,13 @@ pins, said so, and saved a screenshot in which the lock was plainly visible. A w
 cannot announce itself; it can only come up empty.
 
 Getting the **offsets** is the interesting part, because the game plays a nasty trick: *the pin does
-not slide with its plate.* It stays put no matter where the plate is. All it does is **pop up** —
-its blob roughly triples in area — at the moment its plate becomes centered. That signal is binary,
-so it tells you "centered or not" and nothing about magnitude.
+not slide with its plate.* It stays put no matter where the plate is; the plate slides underneath it.
+The pin does one visible thing — it **pops up** at the moment its plate becomes centered — but the
+tool ignores that and reads every plate's position straight from its holes, which say the same thing
+and more. (An earlier version read the pop as a separate "centered" signal; above the 1280×720 floor
+the holes already carry it, so it was removed — see "Reading the lock's state" below.)
 
-The magnitude comes from the holes instead. Each plate is a row of seven holes, and the pin
+The offset comes from the holes. Each plate is a row of seven holes, and the pin
 physically fills one of them, so an offset is just **how many holes sit left of the pin, minus
 three**. To count them the reader rotates the frame by −30° about the fan center, which lays the
 hole rows horizontal and separates the plates vertically. It then finds holes as **2D dark blobs**,
@@ -326,13 +332,14 @@ row and the old walk bridged onto it, reading a perfectly visible row as unreada
 still does not add up to six holes reads `UNKNOWN` rather than guessing. The session treats an
 `UNKNOWN` row as a first-class situation: it never learns from a diff it could not fully see — it
 undoes the move and probes again once the geometry changes, fills the gap from the learned model
-while solving, and confirms "open" only ever from the pin pops. With the exact walk and the
-deskewed gate in place that machinery is a safety net, expected to stay idle.
+while solving, and confirms "open" only from a fresh **direct** read in which every plate's own holes
+place it at 0, with none `UNKNOWN` — never from a model-filled row, which is a guess. With the exact
+walk and the deskewed gate in place that machinery is a safety net, expected to stay idle.
 
 This stage is checked offline: `./gradlew test` replays every labelled frame in
 [`src/test/data/frames/`](src/test/data/frames/) through `LockReaderTest` — the 34-frame 4K
 calibration census, the `6p-gap-shadow` live-failure regression, the 21-frame 7-plate census, and
-the 161-frame resolution sweep — no game, no display.
+the 133-frame resolution sweep — no game, no display.
 
 ### 2. Learning the wiring, without spending picks
 
@@ -378,10 +385,12 @@ plate's true row — and the next move is re-planned from what actually happened
 called free refuses to move at all, the model is wrong about it, so its row is discarded and that
 plate is learned again.
 
-Verification uses the **pin pops**, not the hole rows. `readState` short-circuits a centred plate to
-`0` from its pop, so a fully solved lock does read all-zeros — but the pop is the game's own exact
-signal, while hole counting is indirect and can always meet a new artifact (a popped pin can even
-stand in front of the row behind it). "Open" is therefore always confirmed from the pops.
+"Open" is confirmed from a **fresh direct read**, not a guess. When the plan says the next move
+finishes the lock, the tool plays it and re-reads: only if every plate's own holes place it at `0`,
+with **none unreadable**, does it call the lock open. A model-filled row — one deduced rather than
+seen — can never declare it, so a hidden or mis-modeled plate costs a re-look, not a false "solved".
+(A row that stays hidden in the all-zero configuration itself therefore can't be confirmed at all;
+above the 1280×720 floor that does not happen, since a centred plate hides nothing.)
 
 ### The plumbing
 
@@ -421,7 +430,7 @@ All code lives under the base package `io.github.markosa84.colonysskeletonkey`
 Tests mirror the packages under `src/test/java/`, with `FakeGame` (a simulated lock with hidden
 connections and real strain/break/reset rules) driving the session tests, and the labelled frames
 under [`src/test/data/frames/`](src/test/data/frames/) — the 34-frame 4K census, the
-`6p-gap-shadow` live-failure regression, the 21-frame 7-plate census and the 161-frame resolution
+`6p-gap-shadow` live-failure regression, the 21-frame 7-plate census and the 133-frame resolution
 sweep, deliberately not classpath resources so builds never copy the corpus around — driving
 `LockReaderTest`. The frames keep their full screen dimensions but are black outside the lock box
 and the lockpick counter (`scripts/shrink-frames.ps1`): the reader samples nothing out there, and

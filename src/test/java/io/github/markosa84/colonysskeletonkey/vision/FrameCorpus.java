@@ -25,12 +25,12 @@ import org.junit.jupiter.params.provider.Arguments;
  *   <li><b>The 4K census</b> - slide sequences where each frame differs from the last by exactly one
  *       plate step, so a reader wrong on any one frame breaks the whole sequence's arithmetic. Stated
  *       here, in {@link #censusFrames}, with the provenance of each sequence.</li>
- *   <li><b>The resolution sweep</b> and <b>the gamma slider</b> - both replays of one key protocol,
- *       and both labelled by that protocol rather than by a reading: game state depends on the keys
- *       sent, not on the pixels that come back. Their labels are recorded beside the frames in a
- *       {@code labels.txt}, together with the protocol that establishes them, so they are read from
- *       there ({@link #labels}) rather than copied into Java. A new group - HDR - only has to bring
- *       its own {@code labels.txt}.</li>
+ *   <li><b>The resolution sweep</b>, <b>the gamma slider</b> and <b>the HDR corpus</b> - each a replay
+ *       of one key protocol, and each labelled by that protocol rather than by a reading: game state
+ *       depends on the keys sent, not on the pixels that come back. Their labels are recorded beside
+ *       the frames in a {@code labels.txt}, together with the protocol that establishes them, so they
+ *       are read from there ({@link #labels}) rather than copied into Java. HDR was the newest such
+ *       group and had only to bring its own {@code labels.txt}; a further one is the same.</li>
  * </ul>
  */
 final class FrameCorpus {
@@ -45,7 +45,7 @@ final class FrameCorpus {
             "3840x2160", "2560x1600", "2560x1440", "2048x1536", "1920x1440", "1920x1200",
             "1920x1080", "1680x1050", "1600x1200", "1600x1024", "1600x900", "1440x1080",
             "1366x768", "1360x768", "1280x1024", "1280x960", "1280x800", "1280x768",
-            "1280x720", "1176x664", "1152x864", "1024x768", "800x600",
+            "1280x720",
     };
 
     /** The mode the sweep's labels were read at, and the group that records them. */
@@ -75,10 +75,8 @@ final class FrameCorpus {
      *       "Identifying which plate is selected" note prescribes: the lock's connections were probed
      *       live (a refused move leaves the lock untouched, so probing from one base configuration
      *       costs a strain and nothing else), and every state below was then <b>predicted from that
-     *       model and the keys sent, before the frame was captured</b>. All 21 matched. Three
-     *       independent signals back them up: the pin <b>pop</b> - a different code path, and a
-     *       physically distinct game signal - lands on reported offset 0 in every frame, including
-     *       ones with three and four simultaneous pops; moves were refused exactly where the model
+     *       model and the keys sent, before the frame was captured</b>. All 21 matched. Two
+     *       independent signals back them up: moves were refused exactly where the model
      *       says a plate would run off its track; and a pixel diff of a swept plate's two extremes
      *       shows exactly one plate body moving, its pin standing still.</li>
      * </ul>
@@ -163,7 +161,24 @@ final class FrameCorpus {
     }
 
     /**
-     * The front-plate sweep at every one of the 23 display modes: {@code (frame, viewport, offsets)}.
+     * The HDR corpus: {@code (frame, viewport, offsets)}. The same 7-plate chest and key protocol as
+     * the gamma slider, captured with the game's HDR mode on - the first labelled HDR frames. HDR is
+     * <b>not</b> the gamma slider: it is not an invertible per-pixel LUT (the SDR capture clips where
+     * HDR does not, and the lost highlights cannot be recovered), so it cannot join {@link Tone}'s
+     * family and is read tone-free instead. See {@code hdr/labels.txt} for the protocol and the
+     * measurement, {@link LatticeReaderTest} for the reads, and {@code HdrCorpusTest} for the
+     * off-family panel and the legacy reader's refusal.
+     */
+    static Stream<Arguments> hdrFrames() {
+        Map<String, int[]> labels = labels("hdr");
+        List<Arguments> frames = new ArrayList<>();
+        labels.forEach((name, offsets) ->
+                frames.add(Arguments.of("hdr/" + name, Viewport.REFERENCE, offsets)));
+        return frames.stream();
+    }
+
+    /**
+     * The front-plate sweep at every one of the 19 display modes: {@code (frame, viewport, offsets)}.
      * One 5-plate lock, one key protocol, replayed from a fresh R at each mode - so the states read
      * once at 4K are every mode's states too, which is the claim {@code labels.txt} records and this
      * is the code that acts on it.
@@ -186,6 +201,7 @@ final class FrameCorpus {
         censusFrames().forEach(a ->
                 frames.add(Arguments.of(a.get()[0], Viewport.REFERENCE, a.get()[1])));
         gammaFrames().forEach(frames::add);
+        hdrFrames().forEach(frames::add);
         sweepFrames().forEach(frames::add);
         return frames.stream();
     }

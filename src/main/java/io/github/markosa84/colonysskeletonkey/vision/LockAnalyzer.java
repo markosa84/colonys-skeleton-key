@@ -25,18 +25,12 @@ import io.github.markosa84.colonysskeletonkey.solver.LockModel;
  *   <li>{@link #readState} entries are in {@code [-MAX_OFFSET, +MAX_OFFSET]} or
  *       {@link LockModel#UNKNOWN}, and {@code UNKNOWN} must mean "refused", never "guessed": the
  *       session's whole occlusion machinery leans on that.</li>
- *   <li>{@link #readCentered} is the pin-pop, and it must be independent of the hole rows - it is the
- *       one signal {@code LockSession} may declare a lock open from, so no artefact in the rows may be
- *       able to fake it.</li>
  * </ul>
  */
 public interface LockAnalyzer {
 
     /** Plate count of the lock on screen (4..7), or -1 if no supported lock is visible. */
     int detectPlateCount(BufferedImage img);
-
-    /** Per-plate centred flag (the pin-pop) for a lock known to have {@code n} plates. */
-    boolean[] readCentered(BufferedImage img, int n);
 
     /** Each plate's offset, in {@code [-3, +3]} or {@link LockModel#UNKNOWN}, for an {@code n}-plate lock. */
     int[] readState(BufferedImage img, int n);

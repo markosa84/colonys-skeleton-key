@@ -12,8 +12,8 @@ import io.github.markosa84.colonysskeletonkey.solver.LockModel;
  * Reads the lock without a single absolute pixel value.
  *
  * <p>{@link LockReader} works, and it is calibrated to the pixel - but every gate it has is a number
- * fitted on one screen at one gamma: {@code isPin}'s {@code r >= 130}, the hole scan's
- * {@code luminance < 105}, the pop's {@code area >= 250}. {@link Tone} was built to undo the gamma
+ * fitted on one screen at one gamma: {@code isPin}'s {@code r >= 130} and the hole scan's
+ * {@code luminance < 105}. {@link Tone} was built to undo the gamma
  * slider and it does. What it cannot undo is an <b>HDR tonemap</b>, which compresses the whole picture
  * (diffuse white lands at 183-199 instead of 255) in a way a one-parameter gamma family cannot express:
  * three reporters have frames it mis-corrects into unreadability, and on those frames the reader is not
@@ -48,25 +48,12 @@ import io.github.markosa84.colonysskeletonkey.solver.LockModel;
  * </ul>
  *
  * <p><b>It is now the default reader.</b> Scored by {@code tools/ReaderBench} and pinned by
- * {@code LatticeReaderTest}, it matches {@link LockReader} on <b>every</b> labelled frame - 190/190
- * plate counts, 1005/1005 offsets, across the 53-frame 4K census, the whole gamma slider and all 23
+ * {@code LatticeReaderTest}, it matches {@link LockReader} on <b>every</b> labelled frame - 162/162
+ * plate counts, 865/865 offsets, across the 53-frame 4K census, the whole gamma slider and all 19
  * resolution sweep modes - and on top of that it reads the reporters' HDR dumps, where
  * {@code LockReader} returns -1 and the player is told "no lock detected". {@code LockReader} is kept
  * as the reference (and for its {@code luminance} helper and the constants this class borrows), behind
  * {@code --reader=legacy}.
- *
- * <p>The last frames to fall were the smallest, 800x600, where the centred plate walked only five of
- * six holes: a popped pin is a raised cylinder, and at that scale it merges with a neighbouring hole.
- * That is not a missing plate, it is the plate the game itself is flagging as centred, so a popped row
- * counts as a plate whatever its hole count (see {@link RowFit#isPlate()}) - the same trust in the pop
- * that {@code LockReader} has always placed in it.
- *
- * <p>The <b>pin-pop</b> - {@code readCentered}, the only signal {@code LockSession} may declare a lock
- * open from - takes two gates agreeing (see {@link RowFit#popped()}), and over the whole corpus it
- * produces <b>zero false pops</b>: it never says a plate is centred when it is not, so it can never
- * call a lock open that is not. The handful of pins it under-reads are all genuine pops read faint at a
- * small resolution, which is the harmless direction - a missed pop costs a re-read, nothing more, and
- * the hole count still reads those plates as centred (offset 0) anyway.
  *
  * <h2>The pin is the gap, not the brass</h2>
  * The pin never moves; the plate slides underneath it. So a row's six visible holes always sit on a
@@ -161,35 +148,13 @@ public final class LatticeReader implements LockAnalyzer {
      */
     private static final double LIT_PLATE = 0.42;
 
-    /**
-     * The two gates a pin must pass to count as popped up (centred) - see {@link RowFit#popped()} for
-     * why it takes two, and {@code tools/PopProbe2} for how they were fitted. Both are darkness ratios,
-     * so both are tone-free, and both are measured off the frame.
-     *
-     * <p>{@link #POP_PIN_MIN} is the pin column against its <b>own</b> plate; {@link #POP_DISC_MIN} the
-     * disc at the pin against the whole frame's range. A popped pin is a raised cylinder that darkens
-     * both; the two dark things that fool a single gate - the dark front plate, and a dark plate edge -
-     * fool only one of them. The pins the pair still misreads are 7 of 1005, and every one is a genuine
-     * pop read faint at a small resolution: an under-read, never a false pop.
-     *
-     * <p>The brass <b>area</b> {@link LockReader} uses instead cannot be made tone-free at all - 25
-     * frame-relative colour gates were measured and every one overlaps (see {@code tools/PopProbe}). And
-     * this is read at the slot the <b>geometry</b> names, never the one the hole walk chose, so nothing
-     * in the hole rows can fake it.
-     */
-    private static final double POP_PIN_MIN = 0.094;
-    private static final double POP_DISC_MIN = 0.207;
-
-    /** Half-height of the strip the pin's own darkness is read in, as a fraction of a hole's height. */
-    private static final double PIN_HALF_HEIGHT = 0.25;
-
-    /** Half-height of the strip the plate behind the pin is read in - tall enough to clear the hole. */
+    /** Half-height of the strip a plate's metal is read in - tall enough to clear the hole row. */
     private static final double PLATE_HALF_HEIGHT = 0.60;
 
     private final FanGeometry geo;
     private final double holeMinArea, holeMaxArea;
     private final double holeMinW, holeMaxW, holeMinH, holeMaxH;
-    private final int pinHalf, plateHalf;
+    private final int plateHalf;
 
     /**
      * The gamma correction to undo on the way in - <b>but only when the frame is on the family</b>.
@@ -228,59 +193,29 @@ public final class LatticeReader implements LockAnalyzer {
         this.holeMaxW = geo.holeMaxW * SHAPE_SLACK;
         this.holeMinH = geo.holeMinH / SHAPE_SLACK;
         this.holeMaxH = geo.holeMaxH * SHAPE_SLACK;
-        this.pinHalf = Math.max(1, (int) Math.round(geo.holeMaxH * PIN_HALF_HEIGHT));
         this.plateHalf = Math.max(2, (int) Math.round(geo.holeMaxH * PLATE_HALF_HEIGHT));
     }
 
     /**
-     * What one row came to. The two pop readings are both here because it takes both to be sure: see
-     * {@link #popped()}.
+     * What one row came to.
      *
-     * @param slot     which of the 7 lattice positions holds the pin, or -1 if the row did not add up
-     * @param walked   how many hole slots the walk crossed, out of six
-     * @param lit      this row's metal, against the brightest plate of the same lock
-     * @param pinDark  the pin column's darkness against its <b>own</b> plate
-     * @param discDark the darkness of a disc at the pin, against the whole frame's range
+     * @param slot   which of the 7 lattice positions holds the pin, or -1 if the row did not add up
+     * @param walked how many hole slots the walk crossed, out of six
+     * @param lit    this row's metal, against the brightest plate of the same lock
      */
-    public record RowFit(int slot, int walked, double lit, double pinDark, double discDark) {
+    public record RowFit(int slot, int walked, double lit) {
 
         /**
-         * A plate is a row of six holes in lit steel - <b>or</b> a row of lit steel whose pin has
-         * popped up, which is the same plate with a hole swallowed.
-         *
-         * <p>A popped pin is a raised cylinder, and at a small resolution it merges with a neighbouring
-         * hole, so the walk finds five. That is not a missing plate, it is the plate the game itself is
-         * flagging as centred - and it cost every 800x600 frame past step 0, where the centred plate
-         * walked 5/6 and the whole lock was called unreadable. The {@code lit} guard still stands, so a
-         * dark casing or the room past the fan (never lit, and never popped) cannot slip in this way.
+         * A plate is a row of six holes in lit steel - which nothing else in a room is. The
+         * {@code lit} guard is what rejects the dark front casing and the room past the back of the
+         * fan: both can fake a hole or two, but neither is lit steel.
          */
         public boolean isPlate() {
-            return (walked == HOLES || popped()) && lit >= LIT_PLATE;
+            return walked == HOLES && lit >= LIT_PLATE;
         }
 
         public int offset() {
-            if (popped()) {
-                return 0; // the game's own exact signal - it does not need the hole count
-            }
             return walked == HOLES ? slot - LockModel.MAX_OFFSET : UNKNOWN;
-        }
-
-        /**
-         * True when this plate's pin has popped up - the "centred" signal, and the only one
-         * {@code LockSession} may declare a lock open from. It takes <b>two</b> readings agreeing, and
-         * that is what made it trustworthy (measured, one gate: 1.5% of pins wrong; both: 0.7%, and
-         * every one of those an <i>under</i>-read, never a false pop - see {@code tools/PopProbe2}).
-         *
-         * <p>The two are orthogonal on purpose. {@link #pinDark} - the pin's column against its own
-         * plate - catches the pop but also false-triggers on the dark front plate, whose whole column
-         * is dark. {@link #discDark} - a disc at the pin against the frame's range - is what tells a
-         * raised cylinder (a dark <i>blob</i>) from a dark plate edge (dark everywhere): a real pop
-         * darkens both, an artefact only one. Requiring both keeps the false pops out, which is the
-         * error the session cannot afford - a missed pop only costs a re-read, a false one could call a
-         * lock open that is not.
-         */
-        public boolean popped() {
-            return pinDark >= POP_PIN_MIN && discDark >= POP_DISC_MIN;
         }
     }
 
@@ -315,17 +250,7 @@ public final class LatticeReader implements LockAnalyzer {
         Fan fan = new Fan(img);
         int[] out = new int[n];
         for (int i = 0; i < n; i++) {
-            out[i] = fan.fit(n, i).offset(); // offset() reads the pop itself; a popped plate is 0
-        }
-        return out;
-    }
-
-    /** Per-plate centred flag, from the pin's own column - never from the hole rows. */
-    public boolean[] readCentered(BufferedImage img, int n) {
-        Fan fan = new Fan(img);
-        boolean[] out = new boolean[n];
-        for (int i = 0; i < n; i++) {
-            out[i] = fan.fit(n, i).popped();
+            out[i] = fan.fit(n, i).offset();
         }
         return out;
     }
@@ -345,9 +270,8 @@ public final class LatticeReader implements LockAnalyzer {
             out.append(String.format(Locale.ROOT, "  %d plates:", n));
             for (int i = 0; i < n; i++) {
                 RowFit f = fan.fit(n, i);
-                out.append(String.format(Locale.ROOT, " [%d: %d/6 holes, lit %.2f, pop %.2f/%.2f%s%s]",
-                        i, f.walked(), f.lit(), f.pinDark(), f.discDark(),
-                        f.popped() ? " POPPED" : "", f.isPlate() ? "" : " NOT A ROW"));
+                out.append(String.format(Locale.ROOT, " [%d: %d/6 holes, lit %.2f%s]",
+                        i, f.walked(), f.lit(), f.isPlate() ? "" : " NOT A ROW"));
             }
             out.append('\n');
         }
@@ -593,8 +517,7 @@ public final class LatticeReader implements LockAnalyzer {
             }
             int walked = left + right;
             double own = metal(n, i);
-            return new RowFit(walked == HOLES ? left : -1, walked,
-                    own / plateLevel, pinOwnDark(rowPin, own), discDark(rowPin));
+            return new RowFit(walked == HOLES ? left : -1, walked, own / plateLevel);
         }
 
         /**
@@ -634,42 +557,6 @@ public final class LatticeReader implements LockAnalyzer {
             }
             Arrays.sort(tops);
             return tops[span / 2];
-        }
-
-        /**
-         * How dark the pin's own column is, against <b>its own plate</b>. A flat pin is a low brass dome
-         * and reads bright; a popped one stands up into a cylinder and brings its shadowed flank into
-         * the strip. Against the plate's own metal, not the lock's brightest - so a dark front plate,
-         * whose whole column is dark, does not carry every one of its flat pins over the line.
-         */
-        double pinOwnDark(double[] rowPin, double ownMetal) {
-            double pin = column(rowPin[0], rowPin[1], pinHalf);
-            return (ownMetal - pin) / Math.max(1.0, ownMetal);
-        }
-
-        /**
-         * The mean darkness of a disc at the pin, against the whole frame's range. This is the half of
-         * the pop signal that tells a raised cylinder - a dark <i>blob</i> - from a dark plate edge: the
-         * cylinder darkens the whole disc, the edge only a column of it.
-         */
-        double discDark(double[] rowPin) {
-            int cx = (int) Math.round(rowPin[0]) - x0;
-            int cy = (int) Math.round(rowPin[1]) - y0;
-            double span = Math.max(1.0, plateLevel - black);
-            int r = Math.max(2, (int) Math.round(geo.holeMaxW * 0.45));
-            double sum = 0;
-            int count = 0;
-            for (int dy = -r; dy <= r; dy++) {
-                for (int dx = -r; dx <= r; dx++) {
-                    int xx = cx + dx, yy = cy + dy;
-                    if (xx < 0 || xx >= w || yy < 0 || yy >= h || dx * dx + dy * dy > r * r) {
-                        continue;
-                    }
-                    sum += (plateLevel - lum[yy * w + xx]) / span;
-                    count++;
-                }
-            }
-            return count == 0 ? 0 : sum / count;
         }
 
         /** The median luminance of one column of the strip, in crop coordinates (solid off-crop). */
@@ -753,31 +640,15 @@ public final class LatticeReader implements LockAnalyzer {
     }
 
     /**
-     * Every row's fit, so the ratios above can be re-measured rather than believed.
-     * {@code tools/ReaderBench} is what fits {@link #POP_MIN_DARKNESS} out of this, against the
-     * labelled corpus - the same "measure it, never guess it" rule the tone curves are held to.
+     * Every row's fit, so the geometry ratios can be re-measured rather than believed - what
+     * {@code tools/ReaderBench} scores against the labelled corpus, the same "measure it, never guess
+     * it" rule the tone curves are held to.
      */
     public List<RowFit> rows(BufferedImage img, int n) {
         Fan fan = new Fan(img);
         List<RowFit> out = new ArrayList<>();
         for (int i = 0; i < n; i++) {
             out.add(fan.fit(n, i));
-        }
-        return out;
-    }
-
-    /**
-     * The two pop readings for every plate, so {@code tools/PopProbe2} can re-fit their cuts against
-     * the corpus rather than have them believed - the same "measure it, never guess it" rule the tone
-     * curves are held to. Each row is {@code {pinDark, discDark}}; a plate is popped when both clear
-     * {@link #POP_PIN_MIN} and {@link #POP_DISC_MIN}.
-     */
-    public List<double[]> popFeatures(BufferedImage img, int n) {
-        Fan fan = new Fan(img);
-        List<double[]> out = new ArrayList<>();
-        for (int i = 0; i < n; i++) {
-            RowFit f = fan.fit(n, i);
-            out.add(new double[] {f.pinDark(), f.discDark()});
         }
         return out;
     }

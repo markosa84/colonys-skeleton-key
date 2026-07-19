@@ -17,8 +17,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * Regression tests for {@link LockReader} against every labelled screenshot in
  * {@code src/test/data/frames/}: the 53-frame calibration census (4K), regression frames from
- * live failures, the gamma slider end to end, plus a 161-frame live sweep of one 5-plate lock at
- * all 23 display modes of the dev machine (800x600 through 4K), which pins the {@link Viewport}
+ * live failures, the gamma slider end to end, plus a 133-frame live sweep of one 5-plate lock at
+ * all 19 display modes of the dev machine (1280x720 through 4K), which pins the {@link Viewport}
  * scaling against real renders. Every constant in the reader is fitted to the 4K frames, so any
  * tweak to them must keep this suite green.
  *
@@ -66,12 +66,6 @@ class LockReaderTest {
         int n = reader.detectPlateCount(img);
         assertEquals(expected.length, n, frame + ": plate count");
         assertArrayEquals(expected, reader.readState(img, n), frame + ": offsets");
-        // The two centering signals must agree: a plate reads offset 0 exactly when its pin is
-        // popped (readState short-circuits centred plates from the pop, never from hole counting).
-        boolean[] centered = reader.readCentered(img, n);
-        for (int i = 0; i < n; i++) {
-            assertEquals(expected[i] == 0, centered[i], frame + ": centered flag of plate " + i);
-        }
     }
 
     @ParameterizedTest(name = "{0}")
@@ -222,14 +216,13 @@ class LockReaderTest {
      * The same 7-plate lock, the same key protocol, at both ends of the game's gamma slider - the
      * setting that broke this reader in the field. Raw, these frames fail in opposite ways: at 1.2
      * the brass falls under {@code isPin}'s {@code r >= 130} and <b>no fan fits at all</b> (the
-     * reported bug); at 3.2 the pins survive but the hole rows do not, and no pin reaches
-     * {@code CENTERED_MIN_PIXELS}, so the pop signal - the only thing that confirms an open lock -
-     * is dead.
+     * reported bug); at 3.2 the pins survive but the hole rows brighten past {@code HOLE_MAX_MIN_LUM}
+     * and stop reading, so the reader cannot resolve an offset.
      *
      * <p>Read through the {@link Tone} the frame itself carries, all of it comes back. Note what is
      * being asserted: not "close enough", but the <b>same labels</b> the calibrated fixtures give,
-     * with the pin-pop and the hole count agreeing on every plate of every frame. Only step-0 of
-     * each sweep went into fitting the curves, so steps 1-6 are a straight holdout.
+     * with the hole count agreeing on every plate of every frame. Only step-0 of each sweep went
+     * into fitting the curves, so steps 1-6 are a straight holdout.
      */
     @ParameterizedTest(name = "{0}")
     @MethodSource("gammaFrames")
@@ -239,16 +232,12 @@ class LockReaderTest {
 
         assertEquals(expected.length, toned.detectPlateCount(img), frame + ": plate count");
         assertArrayEquals(expected, toned.readState(img, expected.length), frame + ": offsets");
-        boolean[] centered = toned.readCentered(img, expected.length);
-        for (int i = 0; i < expected.length; i++) {
-            assertEquals(expected[i] == 0, centered[i], frame + ": centered flag of plate " + i);
-        }
     }
 
     /**
      * <b>The gate that keeps the calibration honest.</b> Every frame the reader was fitted on must
      * measure as the calibrated tone - so the estimator resolves to the identity there, every
-     * constant in {@link LockReader} keeps the exact meaning it was measured with, and all 217 of
+     * constant in {@link LockReader} keeps the exact meaning it was measured with, and all 189 of
      * these frames go on vouching for it unchanged. If this fails, the tone is rewriting the very
      * pixels it was calibrated against.
      */

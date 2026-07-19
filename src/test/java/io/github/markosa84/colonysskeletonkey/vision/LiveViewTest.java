@@ -82,15 +82,6 @@ class LiveViewTest {
         assertEquals(List.of(FULL_SCREEN), grabber.asked);
     }
 
-    /** The pin pop is the game's own exact signal, and it agrees with the offsets. */
-    @Test
-    void theViewReadsWhichPinsHavePopped() {
-        LiveLockView view = new LiveLockView(screen, reader, () -> "");
-
-        assertArrayEquals(new boolean[] {true, false, false, false, false}, view.readCentered(5));
-        assertEquals(List.of(FULL_SCREEN), grabber.asked);
-    }
-
     /**
      * A dump must be the <b>full</b> frame. {@code captureLock}'s canvas is stale everywhere outside
      * the lock box, so saving it would hand the next debugging session a lie.

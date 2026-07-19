@@ -51,8 +51,7 @@ final class FakeGame implements LockView, MoveExecutor, CursorKeys {
     /**
      * A stable offset misread: what the reader sees instead of the truth. The move still lands on the
      * <b>truth</b> - the game does not care that we mis-saw it - so a slide the misread makes look safe
-     * can still strain, which is exactly the live failure that wedged the session on a dark frame. The
-     * pins ({@link #readCentered}) are never misread: they are the game's own exact signal.
+     * can still strain, which is exactly the live failure that wedged the session on a dark frame.
      */
     java.util.function.UnaryOperator<int[]> misread = java.util.function.UnaryOperator.identity();
 
@@ -72,15 +71,6 @@ final class FakeGame implements LockView, MoveExecutor, CursorKeys {
     @Override
     public int detectPlateCount() {
         return truth.n();
-    }
-
-    @Override
-    public boolean[] readCentered(int n) {
-        boolean[] centered = new boolean[n];
-        for (int i = 0; i < n; i++) {
-            centered[i] = state[i] == 0;
-        }
-        return centered;
     }
 
     @Override

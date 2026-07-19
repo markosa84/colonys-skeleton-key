@@ -10,7 +10,7 @@ import io.github.markosa84.colonysskeletonkey.solver.LockModel;
 /**
  * Where the lock is, mapped onto one {@link ViewMapping}. The <b>measured</b> half of reading a lock,
  * and the half that has never had to change: it survives four rooms, both ends of the game's gamma
- * slider, 23 display modes from 800x600 to 4K, and an HDR tonemap that defeats every colour constant
+ * slider, 19 display modes from 1280x720 to 4K, and an HDR tonemap that defeats every colour constant
  * in the vision layer. Every reader shares this class, so the numbers live in exactly one place.
  *
  * <p>The split is deliberate, and it is the lesson of the HDR bug. A reader has to answer two very

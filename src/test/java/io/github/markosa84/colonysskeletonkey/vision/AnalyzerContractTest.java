@@ -20,7 +20,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * What {@link LockAnalyzer} promises its callers, asked of <b>every</b> implementation on <b>every</b>
  * labelled frame. The exact reads are each reader's own business - {@link LockReaderTest} and
  * {@link LatticeReaderTest} pin those, and the two readers do not have to be equally good. These
- * three are different: they are the properties {@code LockSession} leans on, and a reader that breaks
+ * two are different: they are the properties {@code LockSession} leans on, and a reader that breaks
  * one of them does not merely read badly, it costs the player lockpicks.
  *
  * <ul>
@@ -28,9 +28,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  *       4..7 is not - it hands the session a model with the wrong number of plates to drive into
  *       walls. This is the bug a reporter actually paid for: a 6-plate chest read as 4, nine strains,
  *       "Stuck".</li>
- *   <li><b>Never a false pop.</b> {@code readCentered} is the only signal a lock may be declared open
- *       from, so the error it must not make is saying a plate is centred when it is not. A missed pop
- *       - a real one read too faint - only costs a re-read, and does happen at small resolutions.</li>
  *   <li><b>Every offset is a real one</b> - in {@code [-3, +3]}, or {@link LockModel#UNKNOWN}, which
  *       must mean "refused" and never "guessed": the session's whole occlusion machinery leans on
  *       that.</li>
@@ -76,21 +73,6 @@ class AnalyzerContractTest {
         assertTrue(n == expected.length || n == -1,
                 frame + ": plate count was " + n + ", which is neither the truth (" + expected.length
                         + ") nor a refusal (-1)");
-    }
-
-    @ParameterizedTest(name = "{0}: {1}")
-    @MethodSource("everyFrameThroughEveryReader")
-    void neverFalsePops(Reader reader, String frame, Viewport viewport, int[] expected) {
-        BufferedImage img = TestFrames.load(frame);
-
-        boolean[] centred = reader.of(img, viewport).readCentered(img, expected.length);
-
-        for (int i = 0; i < expected.length; i++) {
-            if (centred[i]) {
-                assertEquals(0, expected[i],
-                        frame + ": plate " + i + " read as popped, but its offset is " + expected[i]);
-            }
-        }
     }
 
     @ParameterizedTest(name = "{0}: {1}")

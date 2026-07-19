@@ -54,7 +54,7 @@ class ToneTest {
 
     /**
      * The calibrated gamma is the identity, exactly. This is the load-bearing one: it is why the
-     * whole 217-frame corpus goes on vouching for every constant in {@link LockReader} unchanged,
+     * whole 189-frame corpus goes on vouching for every constant in {@link LockReader} unchanged,
      * and why a player at 2.7 sees no behaviour change at all.
      */
     @Test

@@ -39,9 +39,10 @@ Two things Windows will do, because the release is not code-signed (a certificat
 - **Windows**, and the game running **windowed or borderless**.
 - **F8 unbound** in the game's controls menu. The tool only *observes* the key, so the game receives
   it too — make sure it does not do anything there.
-- Any resolution, any monitor. Each F8 measures the window the game is drawing into and scales the
-  4K calibration onto it, so it does not matter whether the game fills your screen. The reader is
-  validated at 23 display modes from 800×600 up, across 16:9, 16:10, 4:3 and 5:4.
+- Any resolution from **1280×720** up, any monitor. Each F8 measures the window the game is drawing
+  into and scales the 4K calibration onto it, so it does not matter whether the game fills your screen.
+  The reader is validated at 19 display modes from 1280×720 up, across 16:9, 16:10, 4:3 and 5:4; below
+  720p the tool declines the lock rather than risk a misread.
 - **Any gamma.** Set the slider wherever you like it: each F8 reads the brightness back off the
   screen and corrects for it. Validated end to end across the whole range, 1.2 to 3.2.
 - The game to be the focused window. **Keys are only ever sent while
@@ -94,7 +95,7 @@ gradlew.bat releaseZip     :: builds the portable zip in build/release/
 The whole suite runs anywhere, with no game and no display: the solver's optimality proofs, the
 session against its fake game, the executor, the capture-box geometry, and the reader's calibration —
 which replays every labelled frame in [`src/test/data/frames`](src/test/data/frames/README.md), all
-217 of them, on every build.
+189 of them, on every build.
 
 ## Disclaimer
 
