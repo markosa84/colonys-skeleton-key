@@ -319,8 +319,8 @@ public final class AutoLockpick {
 
     /**
      * Which reader to build: {@code --reader=lattice|legacy}, else {@code -Dlockpick.reader=...}, else
-     * the calibrated default. It <b>must</b> start with {@code --}, or {@link #resolveGameProcess} would
-     * swallow it as the game's process name (the first non-flag positional wins there).
+     * the default ({@code lattice}). It <b>must</b> start with {@code --}, or {@link #resolveGameProcess}
+     * would swallow it as the game's process name (the first non-flag positional wins there).
      */
     static String resolveReader(String[] args) {
         String prefix = "--reader=";
