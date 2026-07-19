@@ -3,9 +3,9 @@
 Build, run and architecture live in `CLAUDE.md`. Code-level gotchas live in
 `src/main/java/AGENTS.md`. This file is about the *workflow* — the things that cost time.
 
-- **The automated check is `gradlew test`** (JUnit 6; 781 tests, including the screen-reader gate over
-  all 244 labelled frames; no game, no display). `gradlew build` wires it into `check`, **and with it
-  a JaCoCo coverage gate** (≥92% line, ≥90% branch, `win32` excluded). A change that stops testing
+- **The automated check is `gradlew test`** (JUnit 6; ~1966 tests, including the screen-reader gate over
+  all 224 labelled frames; no game, no display). `gradlew build` wires it into `check`, **and with it
+  a JaCoCo coverage gate** (≥94% line, ≥90% branch, `win32` excluded). A change that stops testing
   something fails the build — raise the floor when coverage rises, never lower it to fit a change.
 
 - **A user's bug report is a PNG, and the answer is usually in the sidecar next to it.** A failed read

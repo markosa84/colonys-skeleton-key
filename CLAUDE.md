@@ -44,8 +44,8 @@ goes in one of the first three.
 & .\gradlew.bat build --console=plain
 
 # Just the tests (~30s; includes the 34-frame calibration gate, the live-failure regression
-# frames, the 21-frame 7-plate census, the 133-frame resolution sweep and the 7-frame HDR corpus;
-# no game, no display)
+# frames, the 21-frame 7-plate census, the 133-frame resolution sweep, the 7-frame HDR corpus and
+# the 4-frame dark 1440p corpus; no game, no display)
 & .\gradlew.bat test --console=plain
 
 # One class, or one method (a @ParameterizedTest matches by METHOD name, not by its "seed 0"
@@ -86,7 +86,8 @@ goes in one of the first three.
   dependency and test-scoped — the app itself has none; JaCoCo is a build plugin, not a dependency).
   `LockReaderTest` must stay green on
   **every** frame — the 34-frame census, the `6p-gap-shadow` regression frame, the 21-frame `7p-*`
-  census, the 133-frame resolution sweep, the 27-frame `gamma` corpus and the 7-frame `hdr` corpus:
+  census, the 133-frame resolution sweep, the 27-frame `gamma` corpus, the 7-frame `hdr` corpus and
+  the 4-frame dark 1440p corpus (`captures/4`):
   every `LockReader` constant
   is fitted to the frames under `src/test/data/frames/`. Those PNGs are deliberately **not classpath resources** (the whole corpus
   would be copied into `build/` every clean build); the test task passes their absolute path as
@@ -98,7 +99,7 @@ goes in one of the first three.
   change, 407/407 still green. (JUnit 6's breaking changes — Java 17 baseline, the removed
   `migrationsupport` module, FastCSV replacing univocity — touch nothing here.)
 - **`gradlew build` also enforces coverage** (`jacocoTestCoverageVerification`, wired into `check`):
-  **≥94% line, ≥90% branch**, currently at 94.5/90.6. `win32` is excluded from the report *and* the
+  **≥94% line, ≥90% branch**, currently at 94.8/90.8. `win32` is excluded from the report *and* the
   gate — it is the FFM boundary, and a test of it would test Windows. What is left uncovered is only
   what a headless JVM cannot reach: `AutoLockpick.main` (owns a `Robot`, a `Toolkit` and an endless
   loop) plus its display-owning helpers (`awtScale`, `screenSize`, `environment` — a headless JVM
@@ -168,8 +169,9 @@ connections and the game's real strain/break/reset rules.
     `luminance<105`) fitted at one gamma; `LatticeReader` asks only **ratios of the
     lock's own contrast** (a hole is "much darker than the plate it is cut into", the plate measured
     per-row off the frame), so it holds at any gamma, in **HDR**, and at any resolution. It matches
-    `LockReader` on all 162 labelled frames (865/865 offsets) *and* reads the labelled `hdr/` corpus
-    `LockReader` returns −1 on (7 frames, `HdrCorpusTest`). It still uses `Tone`, but **only on-family** (a real gamma setting):
+    `LockReader` on all 165 labelled frames (883/883 offsets) *and* reads what `LockReader` returns −1
+    on: the labelled `hdr/` corpus (7 frames, `HdrCorpusTest`) and the faintest of the four dark
+    `captures/4` reports. It still uses `Tone`, but **only on-family** (a real gamma setting):
     off-family (HDR, `Tone.isOffFamily()`) it ignores the curve — which cannot express HDR — and
     reads raw. Two design rules it took a while to get right, both pinned by `LatticeReaderTest`:
     the **tracing** gate ("plate or not?") is per-plate-local, the **void** gate ("how black shows
@@ -320,6 +322,21 @@ connections and the game's real strain/break/reset rules.
       the ~4-5s animation out, the session re-homes the cursor, keeps every connection and every
       refusal, and carries on. It gives up after 5 broken picks (`MAX_PICKS`) — no lock in the
       game needs more.
+    - **An unopenable learned model is re-probed, not given up on.** Every lock the game hands you
+      opens, so a fully-probed model the solver cannot open (`allProbed` + no solution) has a misread
+      connection in it. Rather than dump immediately, the session names the likeliest culprit — a
+      plain reachability flood asks which plate's row could be edited to a solvable model (flip a
+      drag's direction, drop one, add one; `reachesGoal` + `singleEditRank`) — clears that plate, and
+      lets discovery **re-probe** it from the configuration the lock is now in, where a
+      configuration-specific misread reads differently. The edit only *names* the suspect; the fresh
+      probe, not the edit, is trusted (**re-probe to confirm, never adopt a guess**), and every solving
+      move stays verified besides. Bounded by `MAX_RECOVERY_RESETS` (4) and `MAX_RECOVERY_PICKS` (2) —
+      well under `MAX_PICKS`, and these dark locks are usually untrained where a break resets — so a
+      multiply-corrupted read still stops and dumps `unsolvable-model`. This is the fix for the four
+      dark 2560×1440 `captures/4` reports: a misread while probing corrupted one connection (in two of
+      them, the *same* lock learned two different unopenable models), and the old code gave up on a
+      lock it could have opened. Pinned by `LockSessionTest` against all four reported models and an
+      end-to-end injected-misread run.
     - **A lock nothing moves on is a lock we MISREAD, and it says so.** Every lock the game hands you
       is openable, so from any configuration some slide is legal. If the session runs out of moves to
       try having never moved a single plate (`moves == 0`), the model is not the lock on screen — it
@@ -474,7 +491,15 @@ misread. A whole-run `loopingWithoutProgress` guard catches any residual no-prog
 `picks-spent`), so the next report arrives with the evidence in it — the failures in these screenshots
 did not. A *fully-probed* model the solver cannot open is likewise a misread, not a hard lock: a real
 lock is always openable and every move reversible, so `allProbed` + no solution ⇒ a mislearned
-connection, dumped as `unsolvable-model`.
+connection. That is **recovered, not just dumped**: the session finds the plate whose row a single
+edit could make solvable (`singleEditRank`, a reachability flood over flip/drop/add edits), clears it,
+and **re-probes** it from the configuration the lock is now in — where a configuration-specific misread
+reads differently — trusting the fresh probe, not the edit (*re-probe to confirm, never adopt a
+guess*). Only when that cannot correct it, within `MAX_RECOVERY_RESETS`/`MAX_RECOVERY_PICKS`, is the
+frame dumped as `unsolvable-model`. This opens the four dark `captures/4` locks the old code gave up
+on. **A reader read is deterministic per frame** — the same pixels always read the same way — so a
+systematic misread cannot be averaged out by re-reading the *same* frame; recovery works by re-probing
+in a *different* configuration, which is the only thing that changes the pixels.
 
 **Unreadable rows are tolerated, never learned from.** A settled observation can contain
 `UNKNOWN` entries — the reader refuses to guess rather than misread. (The one cause ever
@@ -552,16 +577,17 @@ others silently breaks the automation. `KeySenderTest` and `LockSolverTest` pin 
 `LatticeReaderTest` each replay every labelled frame in `src/test/data/frames/` — the 4K calibration
 census, the `6p-gap-shadow` regression frame (a live failure dump whose labels the user established by
 marking every hole), the **4K 7-plate census** (`7p-*`), the 133-frame resolution sweep (19 display
-modes × 7 states, floored at 1280×720), and the **27-frame `gamma` corpus** (the game's slider end to
-end — see below).
-`LatticeReader` matches `LockReader` frame-for-frame (162/162 plate counts, 865/865 offsets) and
-additionally reads the labelled **7-frame `hdr/` corpus** `LockReader` refuses (−1) — the first
-labelled HDR frames, pinned by `HdrCorpusTest` (see below); `LatticeReaderTest` also pins the
+modes × 7 states, floored at 1280×720), the **27-frame `gamma` corpus** (the game's slider end to
+end — see below), and the **4-frame dark 1440p corpus** (`captures/4`, the reports this recovery work
+came from — see below).
+`LatticeReader` matches `LockReader` frame-for-frame (165/165 plate counts, 883/883 offsets) and
+additionally reads what `LockReader` refuses (−1): the **7-frame `hdr/` corpus** (the first labelled
+HDR frames, pinned by `HdrCorpusTest`) and the faintest dark report. `LatticeReaderTest` also pins the
 whole-corpus safety invariants (never a wrong plate count, offsets in range).
 `CaptureBoxTest` proves the capture box contains everything the reader samples — any plate count, any
-offsets, any viewport — with a safety belt. The full suite is **~1940 tests** across
+offsets, any viewport — with a safety belt. The full suite is **~1966 tests** across
 solver/vision/control/session and the root, and **every class outside `win32` is covered** (94.8%
-line / 91.2% branch, gated at 94/90 — see "Testing seams" below).
+line / 90.8% branch, gated at 94/90 — see "Testing seams" below).
 
 **The gamma slider is covered end to end** (`gamma/`, 27 frames, `src/test/data/frames/gamma/labels.txt`).
 The same 7-plate chest, the same key protocol, replayed at every setting from 1.2 to 3.2 — plus the
