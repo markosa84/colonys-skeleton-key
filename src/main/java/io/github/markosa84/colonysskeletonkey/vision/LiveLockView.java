@@ -39,11 +39,6 @@ public final class LiveLockView implements LockView {
         return reader.detectPlateCount(screen.capture());
     }
 
-    @Override
-    public boolean[] readCentered(int n) {
-        return reader.readCentered(screen.capture(), n);
-    }
-
     /**
      * The <b>full</b> view grab, never {@link GameScreen#captureLock()}: every pixel outside the
      * lock box of that composite is stale, and a dump is meant to be re-readable evidence.

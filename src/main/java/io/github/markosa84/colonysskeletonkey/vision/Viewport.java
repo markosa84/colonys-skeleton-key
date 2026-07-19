@@ -22,8 +22,9 @@ package io.github.markosa84.colonysskeletonkey.vision;
  * <p>The mapping is an <b>aspect-fit</b>, measured against the live game: the 16:9 reference view
  * is fitted inside the view and stays centred. Wider aspects show more world at the sides
  * (Hor+, height sets the scale); narrower aspects (16:10, 4:3, 5:4) show more above and below
- * (Vert+, width sets the scale) - verified by live lock sweeps at all 23 display modes of the dev
- * machine, 800x600 through 3840x2160 (the {@code front-plate-sweep} fixtures). Hence:
+ * (Vert+, width sets the scale) - verified by live lock sweeps at all 19 display modes of the dev
+ * machine at/above the 1280x720 floor, 1280x720 through 3840x2160 (the {@code front-plate-sweep}
+ * fixtures). Hence:
  * <ul>
  *   <li>{@link #scale()} is {@code min(width/3840, height/2160)};</li>
  *   <li>{@link #x(double)} and {@link #y(double)} keep a point's scaled distance from the view's

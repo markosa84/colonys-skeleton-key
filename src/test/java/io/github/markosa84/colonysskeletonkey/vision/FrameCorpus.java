@@ -75,10 +75,8 @@ final class FrameCorpus {
      *       "Identifying which plate is selected" note prescribes: the lock's connections were probed
      *       live (a refused move leaves the lock untouched, so probing from one base configuration
      *       costs a strain and nothing else), and every state below was then <b>predicted from that
-     *       model and the keys sent, before the frame was captured</b>. All 21 matched. Three
-     *       independent signals back them up: the pin <b>pop</b> - a different code path, and a
-     *       physically distinct game signal - lands on reported offset 0 in every frame, including
-     *       ones with three and four simultaneous pops; moves were refused exactly where the model
+     *       model and the keys sent, before the frame was captured</b>. All 21 matched. Two
+     *       independent signals back them up: moves were refused exactly where the model
      *       says a plate would run off its track; and a pixel diff of a swept plate's two extremes
      *       shows exactly one plate body moving, its pin standing still.</li>
      * </ul>

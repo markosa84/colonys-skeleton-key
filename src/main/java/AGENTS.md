@@ -12,13 +12,14 @@
 - **Both readers have a regression gate — run it after any change:** `gradlew test` (wired into
   `check`/`build`) replays every labelled frame in `src/test/data/frames/` through **both**
   `LockReaderTest` and `LatticeReaderTest` and must stay green on **every one** (the 4K calibration
-  census, the `6p-gap-shadow` regression frame, the 7-plate census, the 161-frame resolution sweep,
-  and the gamma corpus). `LatticeReaderTest` additionally reads the labelled `hdr/` corpus `LockReader`
+  census, the `6p-gap-shadow` regression frame, the 7-plate census, the 133-frame resolution sweep
+  (19 modes, floored at 1280×720), and the gamma corpus). `LatticeReaderTest` additionally reads the
+  labelled `hdr/` corpus `LockReader`
   refuses (HDR is not an invertible LUT — see CLAUDE.md's dead ends), and pins whole-corpus safety
-  invariants: never a wrong plate count, never a false pop, offsets always in range. To debug offline,
+  invariants: never a wrong plate count, offsets always in range. To debug offline,
   `new LatticeReader(Viewport.REFERENCE)` (or `LockReader`) is safe anywhere: pure image analysis
   (all Robot captures live in `GameScreen`), so feed `ImageIO.read(...)` images straight into
-  `detectPlateCount` / `readCentered` / `readState`. `LatticeReader`'s constants are **ratios** (edit
+  `detectPlateCount` / `readState`. `LatticeReader`'s constants are **ratios** (edit
   them directly); `LockReader`'s and `FanGeometry`'s pixel constants are 4K reference values mapped
   through `Viewport` at construction — edit the reference constants, never the scaled instance fields.
 
@@ -114,8 +115,9 @@
   fixture; drop any new failure dump into `src/test/data/frames/` the same way. Until fixed, such
   a row reads `UNKNOWN` and the session tolerates it: **never learn a connection row from a diff
   that contains `UNKNOWN`** - undo the move and probe again from a different configuration
-  (`LockSession.partiallyObserved` is the pattern). And confirm "solved" from `readCentered`,
-  never from hole counting - the pop is the game's own exact signal.
+  (`LockSession.partiallyObserved` is the pattern). And confirm "solved" only from a fresh **direct**
+  read whose every plate is 0 with none `UNKNOWN` - never from a model-filled row (a filled zero is a
+  guess). The pin-pop that used to carry this was removed; the hole rows carry it now.
 
 - **The slide-sequence fixtures are usable ground truth**, because each frame differs from the
   previous by exactly one plate step. Chain the arithmetic from a known frame and a reader that is

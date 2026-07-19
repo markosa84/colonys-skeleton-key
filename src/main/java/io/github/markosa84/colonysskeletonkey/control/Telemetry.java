@@ -19,7 +19,7 @@ import java.util.Locale;
  *   <li><b>counter grabs</b> - the lockpick-counter fingerprints, two per slide today.</li>
  *   <li><b>keys</b> - navigating the selection and pressing the slide.</li>
  *   <li><b>unaccounted</b> - everything else the session does: the full-screen grabs behind
- *       {@code detectPlateCount}/{@code readCentered}, the cursor re-homing, the solver itself.</li>
+ *       {@code detectPlateCount} and the settle reads, the cursor re-homing, the solver itself.</li>
  * </ul>
  *
  * <p>One session runs at a time on one thread, so none of this needs to be thread-safe.

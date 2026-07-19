@@ -83,9 +83,6 @@ public final class LockReader implements LockAnalyzer {
     private static final int CLUSTER_RADIUS = 24;
     private static final int PIN_MIN_PIXELS = 45;
     private static final int PIN_MAX_PIXELS = 700;
-    /** A pin blob at least this big means the plate is centred (pin popped up). Off-centre pins
-     *  measured ~150-180px, centred ~380-450px; 250 sits safely between. Tunable. */
-    private static final int CENTERED_MIN_PIXELS = 250;
     /** Max distance (px) a detected pin may sit from a plate's fan position to match it. */
     private static final double MATCH_MAX_DIST = 26.0;
 
@@ -143,7 +140,6 @@ public final class LockReader implements LockAnalyzer {
     private final FanGeometry geo;
     private final double clusterRadius;
     private final double pinMinPixels, pinMaxPixels;
-    private final double centeredMinPixels;
     private final double matchMaxDist;
     private final double holeMinArea, holeMaxArea;
     private final double skipMin, skipMax, skipIdeal;
@@ -173,7 +169,6 @@ public final class LockReader implements LockAnalyzer {
         clusterRadius = mapping.len(CLUSTER_RADIUS);
         pinMinPixels = mapping.area(PIN_MIN_PIXELS);
         pinMaxPixels = mapping.area(PIN_MAX_PIXELS);
-        centeredMinPixels = mapping.area(CENTERED_MIN_PIXELS);
         matchMaxDist = mapping.len(MATCH_MAX_DIST);
         holeMinArea = mapping.area(HOLE_MIN_AREA);
         holeMaxArea = mapping.area(HOLE_MAX_AREA);
@@ -329,30 +324,11 @@ public final class LockReader implements LockAnalyzer {
     }
 
     /**
-     * Per-plate centred flag for an {@code n}-plate lock: true where the plate's pin has popped up
-     * (offset 0). A plate whose pin is missing reads false. This is the robust single-frame signal.
-     */
-    public boolean[] readCentered(BufferedImage img, int n) {
-        List<Pin> pins = detectPins(img);
-        boolean[] out = new boolean[n];
-        boolean[] used = new boolean[pins.size()];
-        for (int i = 0; i < n; i++) {
-            int j = matchPin(pins, used, n, i);
-            out[i] = j >= 0 && pins.get(j).size() >= centeredMinPixels;
-            if (j >= 0) used[j] = true;
-        }
-        return out;
-    }
-
-    /**
-     * Reads every plate's offset for a lock known to have {@code n} plates: 0 where the pin has
-     * popped, otherwise (holes left of the pin) - {@link LockModel#MAX_OFFSET}. A plate whose row
-     * does not yield exactly {@link #HOLES_PER_PLATE} holes reads {@link #UNKNOWN}; see
-     * {@link LockModel#isComplete}.
+     * Reads every plate's offset for a lock known to have {@code n} plates: (holes left of the pin) -
+     * {@link LockModel#MAX_OFFSET}. A plate whose row does not yield exactly {@link #HOLES_PER_PLATE}
+     * holes reads {@link #UNKNOWN}; see {@link LockModel#isComplete}.
      */
     public int[] readState(BufferedImage img, int n) {
-        boolean[] centered = readCentered(img, n);
-
         double[][] rowPin = new double[n][];
         for (int i = 0; i < n; i++) {
             rowPin[i] = geo.rowPin(n, i);
@@ -370,10 +346,6 @@ public final class LockReader implements LockAnalyzer {
 
         int[] out = new int[n];
         for (int i = 0; i < n; i++) {
-            if (centered[i]) {
-                out[i] = 0; // pop signal is exact; don't second-guess it
-                continue;
-            }
             int left = walk(rows.get(i), rowPin[i][0], -1, false);
             int right = walk(rows.get(i), rowPin[i][0], +1, false);
             if (left + right != HOLES_PER_PLATE) {

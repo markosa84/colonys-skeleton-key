@@ -26,8 +26,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * so {@link LockReader} refuses (-1) while this one reads every frame from the lock's own contrast.
  *
  * <p>This is where <b>the reads</b> are pinned, exactly: plate count and every offset, over the whole
- * corpus. The safety properties every reader owes - never a wrong plate count, never a false pop,
- * every offset in range or UNKNOWN - are not this reader's business alone and live in
+ * corpus. The safety properties every reader owes - never a wrong plate count, every offset in range
+ * or UNKNOWN - are not this reader's business alone and live in
  * {@link AnalyzerContractTest}, which asks them of both.
  *
  * <p>No game and no display are needed: the reader is pure frame analysis, so everything here reads
@@ -177,23 +177,18 @@ class LatticeReaderTest {
     }
 
     /**
-     * The calibration surface {@code tools/ReaderBench} and {@code tools/PopProbe2} run against: one
-     * {@link LatticeReader.RowFit} per plate, and the two pop readings that back it. Exercised here so
-     * it stays working, and so the pop's own two-gate rule is checked against the record it exposes.
+     * The calibration surface {@code tools/ReaderBench} runs against: one {@link LatticeReader.RowFit}
+     * per plate, the geometry ratios scored against the labelled corpus. Exercised here so it stays
+     * working, and so a clean six-plate frame reads six plates through the record it exposes.
      */
     @Test
-    void exposesPerRowFitsAndPopFeaturesForCalibration() {
+    void exposesPerRowFitsForCalibration() {
         BufferedImage img = TestFrames.load("6p-gap-shadow/step-0.png");
         LatticeReader reader = new LatticeReader(Viewport.REFERENCE);
 
         List<LatticeReader.RowFit> fits = reader.rows(img, 6);
-        List<double[]> features = reader.popFeatures(img, 6);
         assertEquals(6, fits.size());
-        assertEquals(6, features.size());
-        for (int i = 0; i < 6; i++) {
-            LatticeReader.RowFit f = fits.get(i);
-            assertEquals(f.pinDark(), features.get(i)[0], 1e-9, "pinDark must match the fit");
-            assertEquals(f.discDark(), features.get(i)[1], 1e-9, "discDark must match the fit");
+        for (LatticeReader.RowFit f : fits) {
             assertTrue(f.isPlate(), "6p-gap-shadow is six clean plates");
         }
     }

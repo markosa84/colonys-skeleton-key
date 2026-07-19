@@ -166,12 +166,6 @@ class AutoLockpickTest {
         }
 
         @Override
-        public boolean[] readCentered(int n) {
-            probes++;
-            return new boolean[n];
-        }
-
-        @Override
         public void dumpFrame(String tag) {
             dumped.add(tag);
         }
@@ -451,11 +445,6 @@ class AutoLockpickTest {
         @Override
         public int detectPlateCount(java.awt.image.BufferedImage img) {
             return -1;
-        }
-
-        @Override
-        public boolean[] readCentered(java.awt.image.BufferedImage img, int n) {
-            return new boolean[n];
         }
 
         @Override

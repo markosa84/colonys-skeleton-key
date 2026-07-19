@@ -19,8 +19,8 @@
 # its tone-free path and reads every frame; and LockReader - which trusts the tone, and whose nearest
 # curve crushes the brass below isPin - correctly REFUSES (-1) rather than reading a wrong lock. Both
 # behaviours are pinned: HdrCorpusTest asserts the off-family panel and the refusal, LatticeReaderTest
-# asserts the reads, and AnalyzerContractTest holds both readers to "never a wrong plate count, never a
-# false pop" over these frames too.
+# asserts the reads, and AnalyzerContractTest holds both readers to "never a wrong plate count, every
+# offset in range" over these frames too.
 #
 # THE PROTOCOL is the gamma corpus's, so the labels are the same and transfer the same way - game state
 # depends on the keys sent, not on the pixels that come back:

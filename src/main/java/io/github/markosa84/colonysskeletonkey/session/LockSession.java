@@ -83,8 +83,8 @@ import io.github.markosa84.colonysskeletonkey.solver.Move;
  * solving, the unread entries are filled from the model when it explains every visible plate, and
  * every later move keeps re-verifying. When a state arrives unreadable with no move to undo, the
  * session nudges a visible interior plate to change the geometry ({@link #recoverFull}). "Solved"
- * is never concluded from hole rows at all: the goal is confirmed from the pin pops, which no
- * hole-row artifact can touch.
+ * is never concluded from a model-filled zero: the goal is confirmed from a fresh direct read whose
+ * every plate reads 0 with none UNKNOWN, so a guessed row can never declare a lock open.
  *
  * <h2>The player's skill is watched, never asked for</h2>
  * Nothing here depends on the character's {@link Skill}, and nothing here configures it. A broken
@@ -197,6 +197,13 @@ public final class LockSession {
     private int stepNo;
     private String tier = "";
 
+    /**
+     * Set before every move: was it the move the solved plan predicts reaches the goal? If the frame
+     * right after it goes unreadable - the game closing its minigame because the lock opened - that is
+     * what says "solved", where the pin-pop used to.
+     */
+    private boolean winningMove;
+
     public LockSession(LockView view, CursorKeys keys, MoveExecutor mover) {
         this.view = view;
         this.keys = keys;
@@ -270,6 +277,7 @@ public final class LockSession {
         lastKnowledge = Long.MIN_VALUE;
         stepNo = 0;
         tier = "";
+        winningMove = false;
         // The game parks the selection on the lowest plate when a lock opens - and again whenever a
         // pick breaks. Saturating S costs n presses of ~10ms and removes the assumption entirely.
         keys.endCursor(n);
@@ -291,7 +299,9 @@ public final class LockSession {
         try {
             loop();
         } catch (MoveExecutor.UnreadableFrame e) {
-            if (solved()) {
+            if (winningMove) {
+                // The move the plan says reaches the goal landed, and the frame after it went
+                // unreadable - the minigame is closing because the lock opened.
                 report("Lock solved");
             } else {
                 unreadable("mid-run");
@@ -310,16 +320,17 @@ public final class LockSession {
                 return;
             }
             if (LockSolver.isGoal(cur)) {
-                // Hole rows can be hidden or model-filled; the pin pops can be neither. Only they
-                // may declare the lock open.
-                boolean[] popped = view.readCentered(n);
-                if (allTrue(popped)) {
+                // cur may be model-filled - a hidden row filled from the model - and a filled zero is a
+                // guess. Confirm from a fresh DIRECT read: every plate genuinely at 0, none UNKNOWN. An
+                // occluded row reads UNKNOWN here and gets nudged readable next pass; a plate that has
+                // moved reads non-zero and the solver re-plans. Only an all-zero the reader actually
+                // saw declares the lock open - the guarantee the pin-pop used to carry.
+                int[] direct = mover.settle(n);
+                if (LockModel.isComplete(direct) && LockSolver.isGoal(direct)) {
                     report("Lock solved");
                     return;
                 }
-                for (int i = 0; i < n; i++) {
-                    if (!popped[i]) cur[i] = LockModel.UNKNOWN; // that belief was wrong; re-read
-                }
+                cur = direct;
                 continue;
             }
             if (picksSpent() >= MAX_PICKS) {
@@ -426,6 +437,10 @@ public final class LockSession {
         int p = move.plate();
         int dir = move.dir();
         int[] before = cur;
+        // Will this move, if it lands, open the lock? Meaningful only once the model is complete, so a
+        // probe that goes unreadable is never mistaken for the winning move by the catch in run().
+        int[] predicted = allProbed() ? LockSolver.applyMove(model(), before, p, dir) : null;
+        winningMove = predicted != null && LockSolver.isGoal(predicted);
         MoveExecutor.Observation obs = mover.play(n, before, move);
         trace(String.format(Locale.ROOT, "step %d [%s] plate %d %s: %s -> %s (%s%s)",
                 ++stepNo, tier, p, dir > 0 ? "left" : "right", Arrays.toString(before),
@@ -538,7 +553,8 @@ public final class LockSession {
             int[] predicted = LockSolver.applyMove(model(), before, p, move.dir());
             if (predicted != null && matchesReadable(predicted, seen)) {
                 // The model explains everything visible, so the hidden plates followed it too.
-                // Every further move keeps re-verifying, and only the pops declare the goal.
+                // Every further move keeps re-verifying, and only a directly-observed all-zero
+                // declares the goal.
                 System.out.println("  a hole row is hidden; filling it in from the model.");
                 cur = predicted;
                 return;
@@ -598,13 +614,6 @@ public final class LockSession {
     private static boolean matchesReadable(int[] predicted, int[] seen) {
         for (int i = 0; i < seen.length; i++) {
             if (seen[i] != LockModel.UNKNOWN && seen[i] != predicted[i]) return false;
-        }
-        return true;
-    }
-
-    private static boolean allTrue(boolean[] flags) {
-        for (boolean f : flags) {
-            if (!f) return false;
         }
         return true;
     }
@@ -986,11 +995,6 @@ public final class LockSession {
             if (conn[p] == null) out.add(p);
         }
         return out;
-    }
-
-    /** Confirms the lock is open from the pin pops alone, which need no hole rows. */
-    private boolean solved() {
-        return allTrue(view.readCentered(n));
     }
 
     /**

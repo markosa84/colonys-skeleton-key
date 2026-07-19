@@ -24,16 +24,11 @@ import io.github.markosa84.colonysskeletonkey.vision.Viewport;
  *
  * <ul>
  *   <li><b>On home ground it is equal.</b> On the labelled corpus - which the old reader is calibrated
- *       to the pixel on - the lattice reader matches it frame for frame: 190/190 plate counts,
- *       1005/1005 offsets.</li>
+ *       to the pixel on - the lattice reader matches it frame for frame: 162/162 plate counts,
+ *       865/865 offsets.</li>
  *   <li><b>And it wins where the old one loses.</b> On the HDR dumps, where the old reader returns -1
  *       and the player is told "no lock detected", the lattice reader finds the lock.</li>
  * </ul>
- *
- * <p>It also reports the <b>pop</b> as the reader actually decides it - two gates, {@code readCentered}
- * - counting false pops (says centred, is not) apart from missed pops (a real pop read faint). The
- * first is the error a session cannot afford; the second only costs a re-read. {@code tools/PopProbe2}
- * is where those two gates were fitted.
  */
 public final class ReaderBench {
 
@@ -48,31 +43,6 @@ public final class ReaderBench {
 
     public static void main(String[] args) throws Exception {
         List<Shot> corpus = corpus();
-
-        System.out.println("=== The pop, as the reader actually decides it (two gates) ===");
-        int falsePop = 0, missedPop = 0, pins = 0;
-        for (Shot s : corpus) {
-            BufferedImage img = read(s.path());
-            if (img == null) {
-                continue;
-            }
-            Viewport vp0 = new Viewport(img.getWidth(), img.getHeight());
-            boolean[] centred = new LatticeReader(vp0, Tone.estimate(img, vp0)).readCentered(img, s.n());
-            for (int i = 0; i < s.n(); i++) {
-                pins++;
-                boolean truth = s.offsets()[i] == 0;
-                if (centred[i] && !truth) {
-                    falsePop++;   // says centred when it is not - the error the session cannot afford
-                } else if (!centred[i] && truth) {
-                    missedPop++;  // misses a real pop - only costs a re-read
-                }
-            }
-        }
-        System.out.printf(Locale.ROOT,
-                "  %d pins: %d false pops (says centred, is not), %d missed pops (real, read faint)"
-                + " -> %.2f%% wrong, and %s%n%n",
-                pins, falsePop, missedPop, 100.0 * (falsePop + missedPop) / pins,
-                falsePop == 0 ? "not one of them the dangerous kind" : "SOME ARE FALSE POPS");
 
         System.out.println("=== Reader vs reader, on the labelled corpus ===\n");
         System.out.printf(Locale.ROOT, "%-28s %-7s %-14s %-14s %-10s%n",
@@ -101,8 +71,7 @@ public final class ReaderBench {
                             new LockReader(vp, Tone.estimate(img, vp)).readState(img, oldN)));
             System.out.printf(Locale.ROOT, "      LatticeReader  -> %s%n", newN < 0
                     ? "no lock"
-                    : newN + " plates " + offsets(latt.readState(img, newN))
-                            + "   centred " + Arrays.toString(latt.readCentered(img, newN)));
+                    : newN + " plates " + offsets(latt.readState(img, newN)));
         }
     }
 
@@ -252,13 +221,5 @@ public final class ReaderBench {
                     .append(state[i] == LockModel.UNKNOWN ? "?" : String.valueOf(state[i]));
         }
         return b.append(']').toString();
-    }
-
-    static double q(List<Double> sorted, double p) {
-        if (sorted.isEmpty()) {
-            return 0;
-        }
-        int i = (int) Math.round(p * (sorted.size() - 1));
-        return sorted.get(Math.max(0, Math.min(sorted.size() - 1, i)));
     }
 }

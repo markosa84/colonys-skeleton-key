@@ -19,9 +19,8 @@ import java.util.Locale;
  *       perfectly fine. This is what a user actually reported.</li>
  *   <li><b>Bright end.</b> The brass highlights climb over {@code b <= 140}, shrinking the pin blobs
  *       (at 3.2 they measure 51-103px against a calibrated 150-180), and real holes brighten past
- *       {@code HOLE_MAX_MIN_LUM}. Worse, <b>no pin then reaches {@code CENTERED_MIN_PIXELS}</b>: the
- *       pop signal dies, and since the session confirms an open lock from the pops, at 3.2 the tool
- *       could not recognise a lock it had just solved.</li>
+ *       {@code HOLE_MAX_MIN_LUM} so the hole rows stop reading - at 3.2 the reader could not resolve
+ *       a plate's offset at all.</li>
  * </ul>
  *
  * <p>So the frame is mapped back to the calibrated look before the reader ever sees it, and every
@@ -103,7 +102,7 @@ public final class Tone {
 
     /**
      * Nothing to correct: the identity. This is what every existing test gets, and what a frame at
-     * the calibrated gamma resolves to - so the 217-frame corpus keeps vouching for the reader's
+     * the calibrated gamma resolves to - so the 189-frame corpus keeps vouching for the reader's
      * constants unchanged.
      */
     public static final Tone CALIBRATED = new Tone(identity(), CALIBRATED_INK, CALIBRATED_WHITE);
@@ -515,7 +514,7 @@ public final class Tone {
                 """),
         // gamma 2.7 - THE CALIBRATION. Measured off a fresh capture and it came back the identity to
         // within a level across the whole threshold band, so it is written as the exact identity:
-        // at this gamma there is nothing to undo, and the 217-frame corpus must read bit-for-bit as
+        // at this gamma there is nothing to undo, and the 189-frame corpus must read bit-for-bit as
         // it always has.
         new Curve(CALIBRATED_INK, CALIBRATED_WHITE, """
                    0,   1,   2,   3,   4,   5,   6,   7,   8,   9,  10,  11,  12,  13,  14,  15,
