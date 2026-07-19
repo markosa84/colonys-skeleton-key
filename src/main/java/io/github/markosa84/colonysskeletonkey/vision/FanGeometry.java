@@ -102,7 +102,6 @@ public final class FanGeometry {
 
     // --- The same quantities, mapped onto the actual view.
 
-    private final ViewMapping mapping;
     final double fanCenterX, fanCenterY;
     final double depthStepX, depthStepY;
     final int rx0, ry0, rx1, ry1;
@@ -124,7 +123,6 @@ public final class FanGeometry {
      * and this class never needed one: it only ever asked the viewport where things land.
      */
     public FanGeometry(ViewMapping mapping) {
-        this.mapping = mapping;
         fanCenterX = mapping.x(FAN_CENTER_X);
         fanCenterY = mapping.y(FAN_CENTER_Y);
         depthStepX = mapping.len(DEPTH_STEP_X);
@@ -151,11 +149,6 @@ public final class FanGeometry {
         holeMaxH = mapping.len(HOLE_MAX_H);
         holeMinArea = mapping.area(HOLE_MIN_AREA);
         holeMaxArea = mapping.area(HOLE_MAX_AREA);
-    }
-
-    /** Where this fan's reference coordinates land. */
-    public ViewMapping mapping() {
-        return mapping;
     }
 
     /** Expected pin position of plate {@code i} in an {@code n}-plate fan (offset-independent). */

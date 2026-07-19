@@ -18,6 +18,7 @@ import io.github.markosa84.colonysskeletonkey.solver.Connection;
 import io.github.markosa84.colonysskeletonkey.solver.Cost;
 import io.github.markosa84.colonysskeletonkey.solver.LockModel;
 import io.github.markosa84.colonysskeletonkey.solver.LockSolver;
+import io.github.markosa84.colonysskeletonkey.solver.ModelRepair;
 import io.github.markosa84.colonysskeletonkey.solver.Move;
 
 /**
@@ -656,7 +657,7 @@ public final class LockSession {
             if (recoveryTried.contains(p)) {
                 continue;
             }
-            int rank = singleEditRank(base, cur, p);
+            int rank = ModelRepair.singleEditRank(base, cur, p);
             if (rank == Integer.MAX_VALUE) {
                 continue;
             }
@@ -677,146 +678,6 @@ public final class LockSession {
             return rank < incumbentRank;
         }
         return observationCount[p] < observationCount[incumbent];
-    }
-
-    /**
-     * The most minimal single-edit to plate {@code p}'s row that makes the all-centered goal reachable
-     * from {@code from}: 0 flips one connection's direction, 1 drops one, 2 flips them all (a mover
-     * misread reverses the whole row's sense), 3 adds one absent drag. {@link Integer#MAX_VALUE} if no
-     * single edit opens the lock. Package-private and static so the search can be pinned directly
-     * against the models real reports learned - see {@code LockSessionTest}.
-     */
-    static int singleEditRank(LockModel m, int[] from, int p) {
-        Connection[] row = m.connections()[p];
-        if (anyReaches(m, from, p, flipEach(row))) {
-            return 0;
-        }
-        if (anyReaches(m, from, p, dropEach(row))) {
-            return 1;
-        }
-        if (row.length > 1 && reaches(m, from, p, flipAll(row))) {
-            return 2;
-        }
-        if (anyReaches(m, from, p, addEach(m.n(), p, row))) {
-            return 3;
-        }
-        return Integer.MAX_VALUE;
-    }
-
-    private static boolean anyReaches(LockModel m, int[] from, int p, List<Connection[]> candidates) {
-        for (Connection[] candidate : candidates) {
-            if (reaches(m, from, p, candidate)) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    private static boolean reaches(LockModel m, int[] from, int p, Connection[] row) {
-        return reachesGoal(modelWith(m, p, row), from);
-    }
-
-    /** Every row that differs from {@code row} by flipping exactly one connection's direction. */
-    private static List<Connection[]> flipEach(Connection[] row) {
-        List<Connection[]> out = new ArrayList<>();
-        for (int j = 0; j < row.length; j++) {
-            Connection[] c = row.clone();
-            c[j] = new Connection(row[j].target(), flip(row[j].type()));
-            out.add(c);
-        }
-        return out;
-    }
-
-    /** Every row that differs from {@code row} by dropping exactly one connection. */
-    private static List<Connection[]> dropEach(Connection[] row) {
-        List<Connection[]> out = new ArrayList<>();
-        for (int j = 0; j < row.length; j++) {
-            Connection[] c = new Connection[row.length - 1];
-            for (int k = 0, w = 0; k < row.length; k++) {
-                if (k != j) {
-                    c[w++] = row[k];
-                }
-            }
-            out.add(c);
-        }
-        return out;
-    }
-
-    /** {@code row} with every connection's direction flipped - the shape of a misread mover frame. */
-    private static Connection[] flipAll(Connection[] row) {
-        Connection[] c = new Connection[row.length];
-        for (int j = 0; j < row.length; j++) {
-            c[j] = new Connection(row[j].target(), flip(row[j].type()));
-        }
-        return c;
-    }
-
-    /** Every row that adds one absent drag target to {@code row}, as normal and as inverted. */
-    private static List<Connection[]> addEach(int n, int p, Connection[] row) {
-        boolean[] present = new boolean[n];
-        for (Connection c : row) {
-            present[c.target()] = true;
-        }
-        List<Connection[]> out = new ArrayList<>();
-        for (int q = 0; q < n; q++) {
-            if (q == p || present[q]) {
-                continue;
-            }
-            for (Connection.Type type : Connection.Type.values()) {
-                Connection[] c = Arrays.copyOf(row, row.length + 1);
-                c[row.length] = new Connection(q, type);
-                out.add(c);
-            }
-        }
-        return out;
-    }
-
-    private static Connection.Type flip(Connection.Type type) {
-        return type == Connection.Type.NORMAL ? Connection.Type.INVERTED : Connection.Type.NORMAL;
-    }
-
-    /** {@code m} with plate {@code p}'s connection row replaced by {@code row}. */
-    private static LockModel modelWith(LockModel m, int p, Connection[] row) {
-        Connection[][] known = m.connections().clone();
-        known[p] = row;
-        return new LockModel(m.n(), m.start(), known, m.maxOffset());
-    }
-
-    /**
-     * True if the all-centered configuration is reachable from {@code from} under {@code m}. A plain
-     * reachability flood over the configuration space (at most 7^7 states), which is all the suspect
-     * search needs and far cheaper than a least-cost {@link LockSolver#solve}.
-     */
-    private static boolean reachesGoal(LockModel m, int[] from) {
-        int span = 2 * m.maxOffset() + 1;
-        int size = 1;
-        for (int i = 0; i < m.n(); i++) {
-            size *= span;
-        }
-        boolean[] seen = new boolean[size];
-        Deque<int[]> queue = new ArrayDeque<>();
-        seen[(int) LockSolver.encode(m, from)] = true;
-        queue.add(from.clone());
-        while (!queue.isEmpty()) {
-            int[] state = queue.poll();
-            if (LockSolver.isGoal(state)) {
-                return true;
-            }
-            for (int p = 0; p < m.n(); p++) {
-                for (int dir = -1; dir <= 1; dir += 2) {
-                    int[] next = LockSolver.applyMove(m, state, p, dir);
-                    if (next == null) {
-                        continue;
-                    }
-                    int key = (int) LockSolver.encode(m, next);
-                    if (!seen[key]) {
-                        seen[key] = true;
-                        queue.add(next);
-                    }
-                }
-            }
-        }
-        return false;
     }
 
     // --- hidden rows ---
