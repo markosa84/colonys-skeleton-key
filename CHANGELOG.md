@@ -1,5 +1,31 @@
 # Changelog
 
+## [1.4.0](https://github.com/markosa84/colonys-skeleton-key/compare/v1.3.0...v1.4.0) (2026-07-19)
+
+
+### Features
+
+* **session:** recover from a misread connection instead of giving up on the lock ([4bc1c20](https://github.com/markosa84/colonys-skeleton-key/commit/4bc1c20588c6ef1f78cdc97a7358a187307e9cf1))
+* **session:** recover from a misread connection instead of giving up on the lock ([aea9f5c](https://github.com/markosa84/colonys-skeleton-key/commit/aea9f5c018c6aaef1bbd3c934baae2bfabdcd031))
+
+
+### Bug Fixes
+
+* **vision:** threshold the lockpick counter against the panel's own ink and white ([89bd350](https://github.com/markosa84/colonys-skeleton-key/commit/89bd35024a8713e1ad48d4e0871af5e1336ea66d))
+
+
+### Refactoring
+
+* **vision:** extract the affine ViewMapping the viewport already computes ([582ed23](https://github.com/markosa84/colonys-skeleton-key/commit/582ed23312553010d0378601f0730b7acaaf3885))
+* **vision:** gate on a 1280x720 read floor, drop the sub-floor modes ([8b78869](https://github.com/markosa84/colonys-skeleton-key/commit/8b788692cb34b97fc3a7bceb9b27b5bed9ded008))
+* **vision:** remove pin-pop detection; confirm the goal from a direct all-zero read ([b4ce517](https://github.com/markosa84/colonys-skeleton-key/commit/b4ce517212675eb2624a07486cd2232773e35c7f))
+
+
+### Tests
+
+* **vision:** pin the labelled HDR corpus, read tone-free ([4679163](https://github.com/markosa84/colonys-skeleton-key/commit/467916368ff304786b1b32b6191f9375317a3b12))
+* **vision:** share the frame corpus and pin the safety invariants over both readers ([729b891](https://github.com/markosa84/colonys-skeleton-key/commit/729b891d156f16c6e7db5d3ce99d80efa7b9b8e0))
+
 ## [1.3.0](https://github.com/markosa84/colonys-skeleton-key/compare/v1.2.0...v1.3.0) (2026-07-16)
 
 
