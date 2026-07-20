@@ -68,6 +68,11 @@ what the reader saw, and a move-by-move trace of what it did and why. If a lock 
 tool does something odd, **[open an issue](../../issues) and attach that file** (plus any `.png`/`.txt`
 that appear beside it). It is far more use than a screenshot: it says exactly where the run went wrong.
 
+Every lock it *does* open is also appended, one compact block per solve, to
+`captures\lock-history.txt`: when it opened, the state the lock was in when you pressed F8, the plate
+connections it worked out, and the exact key sequence it played to open it. It is a running record of
+your solves, never reset.
+
 ## What it does, plainly
 
 It takes screenshots of your screen and it presses keys. That is all it does.

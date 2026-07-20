@@ -3,6 +3,7 @@ package io.github.markosa84.colonysskeletonkey.session;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Set;
 
 import java.util.concurrent.TimeUnit;
 
@@ -22,6 +23,7 @@ import io.github.markosa84.colonysskeletonkey.solver.TestLocks;
 
 import static io.github.markosa84.colonysskeletonkey.solver.Connection.Type.INVERTED;
 import static io.github.markosa84.colonysskeletonkey.solver.Connection.Type.NORMAL;
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -46,6 +48,59 @@ class LockSessionTest {
 
         assertTrue(game.opened());
         assertEquals(0, game.strains);
+    }
+
+    /**
+     * The solve summary the history log is built from. After a run opens the lock the session exposes
+     * whether it opened, the state it was in when F8 was pressed - not the all-zero it ends on - and the
+     * model it learned; each is a defensive copy, since {@code AutoLockpick} hands them straight to a file.
+     */
+    @Test
+    void exposesInitialStateConnectionsAndSolvedFlagAfterASolve() {
+        LockModel truth = LockModel.of(new int[] {1, -1, 1, -1},
+                rows(row(), row(n(0)), row(), row(i(2))));
+        FakeGame game = new FakeGame(truth, Skill.MASTER);
+        LockSession session = new LockSession(game, game, game);
+
+        Stdout.capturing(session::run);
+
+        assertTrue(game.opened());
+        assertTrue(session.solved(), "a run that opened the lock reports it solved");
+
+        int[] init = session.initialState();
+        assertArrayEquals(new int[] {1, -1, 1, -1}, init, "the F8-time state, not the goal");
+        init[0] = 99;
+        assertArrayEquals(new int[] {1, -1, 1, -1}, session.initialState(), "handed out as a copy");
+
+        // Plates 1 and 3 carry the only drags, so the lock cannot zero without them being probed;
+        // plates 0 and 2 may be dragged to centre unprobed, so tolerate a null (empty) row there.
+        Connection[][] model = session.connections();
+        assertEquals(Set.of(), setOf(model[0]));
+        assertEquals(Set.of(n(0)), setOf(model[1]));
+        assertEquals(Set.of(), setOf(model[2]));
+        assertEquals(Set.of(i(2)), setOf(model[3]));
+
+        Connection kept = model[3][0];
+        model[3][0] = null; // mutating the returned copy must not disturb the session's own model
+        assertEquals(kept, session.connections()[3][0], "connections() hands out a fresh copy each call");
+    }
+
+    /** Before a run, and after a give-up, nothing claims a solve - and the getters do not throw. */
+    @Test
+    void reportsNotSolvedBeforeAndAfterAFailedRun() {
+        assertFalse(new LockSession(null, null, null).solved(), "a fresh session opened nothing");
+        assertNull(new LockSession(null, null, null).initialState(), "and read no initial state");
+        assertEquals(0, new LockSession(null, null, null).connections().length, "and learned no model");
+
+        LockModel truth = LockModel.of(new int[] {0, 3, -3, 0},
+                rows(row(), row(n(2)), row(n(1)), row()));
+        FakeGame game = new FakeGame(truth, Skill.MASTER);
+        LockSession session = new LockSession(game, game, game);
+
+        Stdout.capturing(session::run);
+
+        assertFalse(game.opened());
+        assertFalse(session.solved(), "a stuck lock is never reported as solved");
     }
 
     @ParameterizedTest(name = "seed {0}")
@@ -764,5 +819,10 @@ class LockSessionTest {
 
     private static Connection[][] rows(Connection[]... rows) {
         return rows;
+    }
+
+    /** A row's connections as a set, order-independent and null-tolerant (an unprobed row is empty). */
+    private static Set<Connection> setOf(Connection[] row) {
+        return row == null ? Set.of() : Set.copyOf(Arrays.asList(row));
     }
 }

@@ -19,6 +19,7 @@ import java.util.function.Supplier;
 import javax.imageio.ImageIO;
 
 import io.github.markosa84.colonysskeletonkey.control.KeySender;
+import io.github.markosa84.colonysskeletonkey.control.RecordingKeyboard;
 import io.github.markosa84.colonysskeletonkey.control.RobotKeyboard;
 import io.github.markosa84.colonysskeletonkey.control.Slider;
 import io.github.markosa84.colonysskeletonkey.control.Telemetry;
@@ -100,10 +101,12 @@ public final class AutoLockpick {
 
         Robot robot = new Robot();
         // Every tap re-checks the focus: a session outlives the F8 gate, and an alt-tab mid-run
-        // must abort rather than type W/A/S/D into whatever got focused.
-        RobotKeyboard keyboard = new RobotKeyboard(robot,
-                () -> Win32.foregroundProcessName().equalsIgnoreCase(gameProcess));
+        // must abort rather than type W/A/S/D into whatever got focused. The recorder wraps it so
+        // every key a solve presses is captured for lock-history.txt.
+        RecordingKeyboard keyboard = new RecordingKeyboard(new RobotKeyboard(robot,
+                () -> Win32.foregroundProcessName().equalsIgnoreCase(gameProcess)));
         KeySender keys = new KeySender(keyboard, 0); // the session homes the real cursor
+        LockHistory history = new LockHistory(); // appends one line-block per solved lock
 
         printBanner(gameProcess, dpi);
         if (dumping) {
@@ -147,14 +150,19 @@ public final class AutoLockpick {
                             "f8-" + LocalDateTime.now().format(LOG_STAMP) + ".log");
                     RunLog log = RunLog.open(logFile, System.out);
                     String describe = describeOrWhyNot(reader, screen.capture());
+                    LockSession session = new LockSession(view, keys, slider);
+                    session.traceTo(log.detail()); // null-safe: no file, no trace
+                    keyboard.reset(); // the recorder is reused across presses; record only this one
                     solveLogged(log, System.out, slider.telemetry(), Win32::foregroundProcessName,
                             gameProcess, () -> {
                                 solveHeader(version(), readerKind, viewport, tone,
                                         environment(gameProcess, dpi), describe, log.detail());
-                                LockSession session = new LockSession(view, keys, slider);
-                                session.traceTo(log.detail()); // null-safe: no file, no trace
                                 session.run();
                             });
+                    if (session.solved()) {
+                        history.record(session.initialState(), session.connections(),
+                                keyboard.recorded());
+                    }
                 }
             }
             Thread.sleep(POLL_MS);
