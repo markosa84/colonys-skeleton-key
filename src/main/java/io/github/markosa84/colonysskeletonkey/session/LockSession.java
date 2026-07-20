@@ -240,6 +240,14 @@ public final class LockSession {
      */
     private boolean winningMove;
 
+    /**
+     * The lock as it stood when F8 was pressed - snapshotted at the first read, because {@link #cur}
+     * is overwritten as the run proceeds. Exposed by {@link #initialState()} for the solve history.
+     */
+    private int[] initialState;
+    /** Set the moment the run concludes the lock is open; read back by {@link #solved()}. */
+    private boolean solved;
+
     public LockSession(LockView view, CursorKeys keys, MoveExecutor mover) {
         this(view, keys, mover, new SessionReporter());
     }
@@ -323,6 +331,7 @@ public final class LockSession {
         stepNo = 0;
         tier = "";
         winningMove = false;
+        solved = false;
         // The game parks the selection on the lowest plate when a lock opens - and again whenever a
         // pick breaks. Saturating S costs n presses of ~10ms and removes the assumption entirely.
         keys.endCursor(n);
@@ -337,6 +346,7 @@ public final class LockSession {
             unreadable("before the first move");
             return;
         }
+        initialState = cur.clone(); // cur is overwritten as we go; the history wants the F8-time state
         reporter.detected(n, cur);
         trace("detected " + n + " plates at " + Arrays.toString(cur));
 
@@ -1115,7 +1125,30 @@ public final class LockSession {
 
     /** The one solved-report line, from wherever the run concludes the lock is open. */
     private void reportSolved() {
+        solved = true;
         reporter.solved(strains, picksSpent(), strainsPerPick, breakResetThePuzzle);
+    }
+
+    /** Whether this run opened the lock. False on any give-up, and before {@link #run()} concludes. */
+    public boolean solved() {
+        return solved;
+    }
+
+    /** The offsets read the instant F8 was pressed, or null if no lock was ever detected. */
+    public int[] initialState() {
+        return initialState == null ? null : initialState.clone();
+    }
+
+    /** A copy of the learned model: {@code [p]} is what moving p drags (null while unprobed). */
+    public Connection[][] connections() {
+        if (conn == null) {
+            return new Connection[0][];
+        }
+        Connection[][] copy = new Connection[conn.length][];
+        for (int p = 0; p < conn.length; p++) {
+            copy[p] = conn[p] == null ? null : conn[p].clone();
+        }
+        return copy;
     }
 
     private void unreadable(String when) {

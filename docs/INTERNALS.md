@@ -143,6 +143,11 @@ ColonysSkeletonKey.exe --diagnose captures\no-lock-20260713-103856-180.png
 
 It prints the gamma it read, every brass pin it found, which plate counts fit them, and the offsets.
 
+Every lock it opens is appended, one compact block per solve, to `captures\lock-history.txt`: the
+date and time, the state the lock was in when you pressed F8, the plate connections it worked out, and
+the exact key sequence it played (`W`/`S` to pick a plate, `A`/`D` to slide it). It is a running record
+of your solves — never reset, and written only on success, so a failed attempt leaves nothing in it.
+
 If it strains and a lockpick breaks, that is expected, not fatal. F8 notices (from the lockpick
 counter), waits out the ~4–5 s animation during which the game ignores input, re-homes the selection,
 **keeps every connection it has learned**, and carries on discovering the rest. If you are untrained

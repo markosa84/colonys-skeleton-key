@@ -99,7 +99,7 @@ goes in one of the first three.
   change, 407/407 still green. (JUnit 6's breaking changes — Java 17 baseline, the removed
   `migrationsupport` module, FastCSV replacing univocity — touch nothing here.)
 - **`gradlew build` also enforces coverage** (`jacocoTestCoverageVerification`, wired into `check`):
-  **≥94% line, ≥90% branch**, currently at 94.8/90.8. `win32` is excluded from the report *and* the
+  **≥94% line, ≥90% branch**, currently at 94.5/90.5. `win32` is excluded from the report *and* the
   gate — it is the FFM boundary, and a test of it would test Windows. What is left uncovered is only
   what a headless JVM cannot reach: `AutoLockpick.main` (owns a `Robot`, a `Toolkit` and an endless
   loop) plus its display-owning helpers (`awtScale`, `screenSize`, `environment` — a headless JVM
@@ -281,6 +281,11 @@ connections and the game's real strain/break/reset rules.
     tap** and throws `FocusLost` (caught in `AutoLockpick`) — the F8 gate only covers the start
     of a session, and an alt-tab mid-run must abort instead of typing W/A/S/D into whatever got
     focused (it typed into IDEA once).
+  - **`RecordingKeyboard`** — a `Keyboard` decorator that remembers the literal `W/S/A/D` stream it
+    forwarded, for `lock-history.txt`. It records **after** the delegate returns, so a tap the focus
+    gate refused (`FocusLost`) leaves no trace — the record is the keys that actually landed.
+    `AutoLockpick` wraps `RobotKeyboard` in it, `reset()`s once per F8, and hands `recorded()` to
+    `LockHistory` on a solve.
   - **`Slider`** — the one place a plate is ever moved: press the key, watch through a
     `LockPoller` (readLock reports unreadable plates as `LockModel.UNKNOWN`), and report
     `MOVED` / `UNCHANGED` / `RESET` plus whether a pick broke (fingerprint diff). **The counter is
@@ -383,6 +388,14 @@ connections and the game's real strain/break/reset rules.
   `traceTo` trace (tier + before→after + outcome per step, the plan, the learned model) — and deletes
   itself if the press was never focused. The console keeps the headline; the file has everything. All
   of it is a diagnostic, so a file that will not open costs a line, never the run.
+
+- **`LockHistory`** (root) — appends one concise block per **solved** lock to
+  `captures/lock-history.txt`: the timestamp, the F8-time state, the learned connections, and the whole
+  literal `W/S/A/D` sequence. Success-only and never reset — the opposite intent to the per-F8 `RunLog`.
+  A `(Path, Clock)` seam like `Captures`, so it tests headless. The write lives in `AutoLockpick`, the
+  only place the recorder and the session meet: `LockSession` exposes `solved()` / `initialState()`
+  (snapshotted at the first read, before `cur` is overwritten) / `connections()`, and the composition
+  root feeds those plus `RecordingKeyboard.recorded()` to `history.record(...)`.
 
 ### Testing seams (four, all package-private — use them, don't add a fifth)
 
@@ -585,9 +598,9 @@ additionally reads what `LockReader` refuses (−1): the **7-frame `hdr/` corpus
 HDR frames, pinned by `HdrCorpusTest`) and the faintest dark report. `LatticeReaderTest` also pins the
 whole-corpus safety invariants (never a wrong plate count, offsets in range).
 `CaptureBoxTest` proves the capture box contains everything the reader samples — any plate count, any
-offsets, any viewport — with a safety belt. The full suite is **~1966 tests** across
-solver/vision/control/session and the root, and **every class outside `win32` is covered** (94.8%
-line / 90.8% branch, gated at 94/90 — see "Testing seams" below).
+offsets, any viewport — with a safety belt. The full suite is **~1985 tests** across
+solver/vision/control/session and the root, and **every class outside `win32` is covered** (94.5%
+line / 90.5% branch, gated at 94/90 — see "Testing seams" below).
 
 **The gamma slider is covered end to end** (`gamma/`, 27 frames, `src/test/data/frames/gamma/labels.txt`).
 The same 7-plate chest, the same key protocol, replayed at every setting from 1.2 to 3.2 — plus the
