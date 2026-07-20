@@ -18,6 +18,7 @@ import io.github.markosa84.colonysskeletonkey.solver.Connection;
 import io.github.markosa84.colonysskeletonkey.solver.Cost;
 import io.github.markosa84.colonysskeletonkey.solver.LockModel;
 import io.github.markosa84.colonysskeletonkey.solver.LockSolver;
+import io.github.markosa84.colonysskeletonkey.solver.ModelRepair;
 import io.github.markosa84.colonysskeletonkey.solver.Move;
 
 /**
@@ -145,6 +146,7 @@ public final class LockSession {
     private final LockView view;
     private final CursorKeys keys;
     private final MoveExecutor mover;
+    private final SessionReporter reporter;
 
     private int n;
     /** {@code conn[p]} is what moving p drags, or null while p is unprobed. */
@@ -239,9 +241,15 @@ public final class LockSession {
     private boolean winningMove;
 
     public LockSession(LockView view, CursorKeys keys, MoveExecutor mover) {
+        this(view, keys, mover, new SessionReporter());
+    }
+
+    /** With an injected reporter, so a test can watch the console story without scraping stdout. */
+    LockSession(LockView view, CursorKeys keys, MoveExecutor mover, SessionReporter reporter) {
         this.view = view;
         this.keys = keys;
         this.mover = mover;
+        this.reporter = reporter;
     }
 
     /** Sends the verbose move-by-move trace to {@code trace} (the per-F8 log file). Off by default. */
@@ -262,7 +270,7 @@ public final class LockSession {
         }
         trace("model, as learned:");
         for (int p = 0; p < n; p++) {
-            trace("  plate " + p + " -> " + (conn[p] == null ? "UNPROBED" : describe(conn[p])));
+            trace("  plate " + p + " -> " + (conn[p] == null ? "UNPROBED" : SessionReporter.describe(conn[p])));
         }
         trace(String.format(Locale.ROOT,
                 "state %s | strains %d (misread %d, gamble %d) | breaks %d | moves %d",
@@ -285,11 +293,8 @@ public final class LockSession {
             // Not "at 4K": every resolution is supported, and saying otherwise sent one reporter
             // hunting the wrong problem for a week. When this fires with the lock plainly open on
             // screen, the frame is fine and the coordinates are not - which is what the dump says.
-            System.out.println("No " + LockModel.MIN_PLATES + "-" + LockModel.MAX_PLATES + " plate "
-                    + "lock detected. Is the lock open, with the game in the foreground?");
+            reporter.noLockDetected();
             view.dumpFrame("no-lock");
-            System.out.println("If the lock was open and the saved frame looks fine, the tool is "
-                    + "reading the wrong part of it: open the .txt beside it, and please report it.");
             return;
         }
         conn = new Connection[n][];
@@ -332,8 +337,7 @@ public final class LockSession {
             unreadable("before the first move");
             return;
         }
-        System.out.println("Detected " + n + " plates at " + Arrays.toString(cur)
-                + ". Learning the connections, then solving.");
+        reporter.detected(n, cur);
         trace("detected " + n + " plates at " + Arrays.toString(cur));
 
         try {
@@ -342,7 +346,7 @@ public final class LockSession {
             if (winningMove) {
                 // The move the plan says reaches the goal landed, and the frame after it went
                 // unreadable - the minigame is closing because the lock opened.
-                report("Lock solved");
+                reportSolved();
             } else {
                 unreadable("mid-run");
             }
@@ -354,8 +358,7 @@ public final class LockSession {
     private void loop() {
         while (true) {
             if (!recoverFull()) {
-                System.out.println("Stuck: a plate's hole row stays hidden after every nudge. "
-                        + "Slide any plate one step by hand and press F8 again.");
+                reporter.stuckHiddenRow();
                 view.dumpFrame("hidden-row");
                 return;
             }
@@ -367,16 +370,14 @@ public final class LockSession {
                 // saw declares the lock open - the guarantee the pin-pop used to carry.
                 int[] direct = mover.settle(n);
                 if (LockModel.isComplete(direct) && LockSolver.isGoal(direct)) {
-                    report("Lock solved");
+                    reportSolved();
                     return;
                 }
                 cur = direct;
                 continue;
             }
             if (picksSpent() >= MAX_PICKS) {
-                System.out.println("Giving up after " + strains + " strain(s), about " + picksSpent()
-                        + " broken pick(s). Plates " + unprobed() + " never moved. Every lock in the "
-                        + "game opens well inside this, so the fault is here, not in the lock.");
+                reporter.giveUpPicksSpent(strains, picksSpent(), unprobed());
                 view.dumpFrame("picks-spent");
                 return;
             }
@@ -384,18 +385,12 @@ public final class LockSession {
                 // A slide can only strain by dragging a plate off an end. Enough strains the read
                 // called impossible means the reader has lost this frame, not that the lock is hard -
                 // so stop before it spends picks, and save the frame that beat it.
-                System.out.println("Stopping: " + misreadStrains + " slides I read as safe still "
-                        + "strained, which can only be a misread offset. This frame is unusually dark; "
-                        + "the reader has lost it, so going on would only cost picks. Saved the frame.");
+                reporter.misreadGiveUp(misreadStrains);
                 view.dumpFrame("misread");
-                System.out.println("Please report the saved .png and the .txt beside it.");
                 return;
             }
             if (loopingWithoutProgress()) {
-                System.out.println("Stopping: I keep returning to the same configuration without "
-                        + "learning anything new" + (misreadStrains > 0
-                            ? " - most likely a misread on this unusually dark frame." : ".")
-                        + " Saved the frame instead of looping.");
+                reporter.noProgress(misreadStrains);
                 view.dumpFrame(misreadStrains > 0 ? "misread" : "no-progress");
                 return;
             }
@@ -407,12 +402,8 @@ public final class LockSession {
                     // lock being driven is not the lock on screen: the plate count or the offsets
                     // were misread, and every strain above was spent proving it. Reported as the bug
                     // it is, with the frame attached, instead of shrugging at the lock.
-                    System.out.println("Nothing moved. No plate would slide in either direction, and "
-                            + "a lock the game can open always has a legal move - so the lock I read "
-                            + "is not the lock on screen (the plate count or the offsets are wrong). "
-                            + "That is a bug in this tool, not a hard lock.");
+                    reporter.wrongModel();
                     view.dumpFrame("wrong-model");
-                    System.out.println("Please report the saved .png and the .txt beside it.");
                     return;
                 }
                 if (allProbed()) {
@@ -424,19 +415,11 @@ public final class LockSession {
                     if (tryRecoverUnsolvable()) {
                         continue;
                     }
-                    System.out.println("The connections I learned do not add up to a lock that opens, "
-                            + "but the game only ever gives you locks that do - so I misread a plate "
-                            + "while learning it, and re-probing could not correct it. This frame is "
-                            + "dark. Saved it.");
+                    reporter.unsolvableModelGiveUp();
                     view.dumpFrame("unsolvable-model");
-                    System.out.println("Please report the saved .png and the .txt beside it.");
                     return;
                 }
-                System.out.println("Stuck: no move is left to try. Plates " + unprobed()
-                        + " will not budge in either direction, and no probed plate can free them."
-                        + (misreadStrains > 0 ? " (" + misreadStrains + " slide(s) I read as safe still "
-                            + "strained on the way - this frame is dark and I may be misreading it.)"
-                            : ""));
+                reporter.stuck(unprobed(), misreadStrains);
                 view.dumpFrame(misreadStrains > 0 ? "misread" : "stuck");
                 return;
             }
@@ -536,30 +519,22 @@ public final class LockSession {
 
         if (obs.pickBroke()) {
             recordBreak(obs.outcome() == MoveExecutor.Outcome.RESET);
-            System.out.println("  the pick broke after " + strainsPerPick + " strain(s)" + levelSeen()
-                    + " (" + observedBreaks + " so far)"
-                    + (obs.outcome() == MoveExecutor.Outcome.RESET
-                        ? "; the puzzle reset to " + Arrays.toString(cur)
-                        : "; the lock is untouched at " + Arrays.toString(cur))
-                    + ". Keeping every connection learned so far.");
+            reporter.pickBroke(strainsPerPick, observedBreaks,
+                    obs.outcome() == MoveExecutor.Outcome.RESET, breakResetThePuzzle, cur);
             return;
         }
         if (conn[p] != null) {
             // The model swore this was legal. It is the model that is wrong, so re-probe p.
-            System.out.println("  plate " + p + " refused a move its connections say is legal;"
-                    + " discarding what we knew about it.");
+            reporter.refusedLegalMove(p);
             conn[p] = null;
             corrections++;
         } else if (contradictory) {
             // Nothing was at an end, so don't retry this exact slide from this exact configuration;
             // once some plate moves, the misread may resolve and it becomes worth another look.
             occluded.add(new Occlusion(p, dir, LockSolver.encode(model(), before)));
-            System.out.println("  plate " + p + " would not slide " + name(dir) + " though nothing sits "
-                    + "at an end - I am misreading a plate on this dark frame (" + misreadStrains
-                    + " so far).");
+            reporter.contradictoryStrain(p, dir, misreadStrains);
         } else {
-            System.out.println("  plate " + p + " will not slide " + name(dir) + " yet: it must drag a "
-                    + "plate already at the end of its track (strain " + strains + ").");
+            reporter.willNotSlideYet(p, dir, strains);
         }
     }
 
@@ -596,8 +571,7 @@ public final class LockSession {
         observationCount[p]++;
         if (first) {
             inEscalation = false; // a plate newly probed is real progress; leave the escalation regime
-            System.out.println("  plate " + p + " drags " + describe(conn[p])
-                    + (allProbed() ? "  -- every connection known, solving" : ""));
+            reporter.probed(p, conn[p], allProbed());
         }
         return true;
     }
@@ -635,8 +609,7 @@ public final class LockSession {
         plan = null;
         corrections++; // a suspect cleared is progress: reconsider the plan, reset the loop guard
         recoveryResets++;
-        System.out.println("  the learned model will not open the lock, which can only be a misread "
-                + "while probing. Re-probing plate " + suspect + " to correct it.");
+        reporter.reProbing(suspect);
         trace("recovery: re-probing plate " + suspect + " (no solution from " + Arrays.toString(cur)
                 + "), reset " + recoveryResets + "/" + MAX_RECOVERY_RESETS);
         return true;
@@ -656,7 +629,7 @@ public final class LockSession {
             if (recoveryTried.contains(p)) {
                 continue;
             }
-            int rank = singleEditRank(base, cur, p);
+            int rank = ModelRepair.singleEditRank(base, cur, p);
             if (rank == Integer.MAX_VALUE) {
                 continue;
             }
@@ -679,146 +652,6 @@ public final class LockSession {
         return observationCount[p] < observationCount[incumbent];
     }
 
-    /**
-     * The most minimal single-edit to plate {@code p}'s row that makes the all-centered goal reachable
-     * from {@code from}: 0 flips one connection's direction, 1 drops one, 2 flips them all (a mover
-     * misread reverses the whole row's sense), 3 adds one absent drag. {@link Integer#MAX_VALUE} if no
-     * single edit opens the lock. Package-private and static so the search can be pinned directly
-     * against the models real reports learned - see {@code LockSessionTest}.
-     */
-    static int singleEditRank(LockModel m, int[] from, int p) {
-        Connection[] row = m.connections()[p];
-        if (anyReaches(m, from, p, flipEach(row))) {
-            return 0;
-        }
-        if (anyReaches(m, from, p, dropEach(row))) {
-            return 1;
-        }
-        if (row.length > 1 && reaches(m, from, p, flipAll(row))) {
-            return 2;
-        }
-        if (anyReaches(m, from, p, addEach(m.n(), p, row))) {
-            return 3;
-        }
-        return Integer.MAX_VALUE;
-    }
-
-    private static boolean anyReaches(LockModel m, int[] from, int p, List<Connection[]> candidates) {
-        for (Connection[] candidate : candidates) {
-            if (reaches(m, from, p, candidate)) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    private static boolean reaches(LockModel m, int[] from, int p, Connection[] row) {
-        return reachesGoal(modelWith(m, p, row), from);
-    }
-
-    /** Every row that differs from {@code row} by flipping exactly one connection's direction. */
-    private static List<Connection[]> flipEach(Connection[] row) {
-        List<Connection[]> out = new ArrayList<>();
-        for (int j = 0; j < row.length; j++) {
-            Connection[] c = row.clone();
-            c[j] = new Connection(row[j].target(), flip(row[j].type()));
-            out.add(c);
-        }
-        return out;
-    }
-
-    /** Every row that differs from {@code row} by dropping exactly one connection. */
-    private static List<Connection[]> dropEach(Connection[] row) {
-        List<Connection[]> out = new ArrayList<>();
-        for (int j = 0; j < row.length; j++) {
-            Connection[] c = new Connection[row.length - 1];
-            for (int k = 0, w = 0; k < row.length; k++) {
-                if (k != j) {
-                    c[w++] = row[k];
-                }
-            }
-            out.add(c);
-        }
-        return out;
-    }
-
-    /** {@code row} with every connection's direction flipped - the shape of a misread mover frame. */
-    private static Connection[] flipAll(Connection[] row) {
-        Connection[] c = new Connection[row.length];
-        for (int j = 0; j < row.length; j++) {
-            c[j] = new Connection(row[j].target(), flip(row[j].type()));
-        }
-        return c;
-    }
-
-    /** Every row that adds one absent drag target to {@code row}, as normal and as inverted. */
-    private static List<Connection[]> addEach(int n, int p, Connection[] row) {
-        boolean[] present = new boolean[n];
-        for (Connection c : row) {
-            present[c.target()] = true;
-        }
-        List<Connection[]> out = new ArrayList<>();
-        for (int q = 0; q < n; q++) {
-            if (q == p || present[q]) {
-                continue;
-            }
-            for (Connection.Type type : Connection.Type.values()) {
-                Connection[] c = Arrays.copyOf(row, row.length + 1);
-                c[row.length] = new Connection(q, type);
-                out.add(c);
-            }
-        }
-        return out;
-    }
-
-    private static Connection.Type flip(Connection.Type type) {
-        return type == Connection.Type.NORMAL ? Connection.Type.INVERTED : Connection.Type.NORMAL;
-    }
-
-    /** {@code m} with plate {@code p}'s connection row replaced by {@code row}. */
-    private static LockModel modelWith(LockModel m, int p, Connection[] row) {
-        Connection[][] known = m.connections().clone();
-        known[p] = row;
-        return new LockModel(m.n(), m.start(), known, m.maxOffset());
-    }
-
-    /**
-     * True if the all-centered configuration is reachable from {@code from} under {@code m}. A plain
-     * reachability flood over the configuration space (at most 7^7 states), which is all the suspect
-     * search needs and far cheaper than a least-cost {@link LockSolver#solve}.
-     */
-    private static boolean reachesGoal(LockModel m, int[] from) {
-        int span = 2 * m.maxOffset() + 1;
-        int size = 1;
-        for (int i = 0; i < m.n(); i++) {
-            size *= span;
-        }
-        boolean[] seen = new boolean[size];
-        Deque<int[]> queue = new ArrayDeque<>();
-        seen[(int) LockSolver.encode(m, from)] = true;
-        queue.add(from.clone());
-        while (!queue.isEmpty()) {
-            int[] state = queue.poll();
-            if (LockSolver.isGoal(state)) {
-                return true;
-            }
-            for (int p = 0; p < m.n(); p++) {
-                for (int dir = -1; dir <= 1; dir += 2) {
-                    int[] next = LockSolver.applyMove(m, state, p, dir);
-                    if (next == null) {
-                        continue;
-                    }
-                    int key = (int) LockSolver.encode(m, next);
-                    if (!seen[key]) {
-                        seen[key] = true;
-                        queue.add(next);
-                    }
-                }
-            }
-        }
-        return false;
-    }
-
     // --- hidden rows ---
 
     /**
@@ -835,16 +668,14 @@ public final class LockSession {
                 // The model explains everything visible, so the hidden plates followed it too.
                 // Every further move keeps re-verifying, and only a directly-observed all-zero
                 // declares the goal.
-                System.out.println("  a hole row is hidden; filling it in from the model.");
+                reporter.fillingHiddenRow();
                 cur = predicted;
                 return;
             }
-            System.out.println("  plate " + p + " did not do what its connections predicted, and a"
-                    + " hidden row prevents relearning here; discarding what we knew about it.");
+            reporter.hiddenRowDiscardKnown(p);
             conn[p] = null;
         } else {
-            System.out.println("  plate " + p + "'s move hid another plate's row; undoing it to"
-                    + " probe again from a different configuration.");
+            reporter.undoingHidRow(p);
         }
         occluded.add(new Occlusion(p, move.dir(), LockSolver.encode(model(), before)));
         MoveExecutor.Observation undo = mover.play(n, seen, new Move(p, -move.dir()));
@@ -867,8 +698,7 @@ public final class LockSession {
             Move nudge = unoccludeNudge(tried);
             if (nudge == null) return false;
             tried.add(nudge.plate() * 4 + (nudge.dir() > 0 ? 1 : 0));
-            System.out.println("  a hole row is hidden; nudging plate " + nudge.plate()
-                    + " to uncover it.");
+            reporter.nudgingHiddenRow(nudge.plate());
             MoveExecutor.Observation obs = mover.play(n, cur, nudge);
             absorb(obs);
             cur = obs.state();
@@ -957,7 +787,7 @@ public final class LockSession {
         List<Move> moves = LockSolver.solve(model(), cur, keys.cursor(), Cost.WALLCLOCK);
         if (moves == null || moves.isEmpty()) {
             plan = null;
-            System.out.println("No strain-free solution exists from " + Arrays.toString(cur) + ".");
+            reporter.noSolution(cur);
             return null;
         }
         plan = new ArrayList<>(moves);
@@ -1000,8 +830,7 @@ public final class LockSession {
             if (conn[p] != null) continue;
             List<Move> plan = planUnblock(p);
             if (plan != null && !plan.isEmpty()) {
-                System.out.println("  plate " + p + " is blocked; clearing the ends for it with "
-                        + plan.size() + " move(s) of plates we already understand.");
+                reporter.clearingEnds(p, plan.size());
                 return plan.get(0);
             }
         }
@@ -1125,8 +954,7 @@ public final class LockSession {
         if (setup == null || setup.isEmpty()) {
             return null;
         }
-        System.out.println("  no safe probe left; repositioning plates we understand to free one to "
-                + "gamble (" + setup.size() + " move(s)).");
+        reporter.repositioning(setup.size());
         return setup.get(0);
     }
 
@@ -1285,44 +1113,14 @@ public final class LockSession {
         return observedBreaks;
     }
 
-    private void report(String what) {
-        System.out.println(what + ". " + strains + " strain(s), " + picksSpent()
-                + " pick(s) broken." + skillSeen());
-    }
-
-    /** The tail of the report line, when a pick broke and so said something about the character. */
-    private String skillSeen() {
-        if (observedBreaks == 0) {
-            return "";
-        }
-        return " The last pick took " + strainsPerPick + " strain(s)" + levelSeen() + ".";
-    }
-
-    /**
-     * The lockpicking level the last broken pick revealed, as a clause to append - or nothing.
-     *
-     * <p>Nothing depends on this; it is for the player to read. And it is deliberately hedged: a
-     * pick carries its damage between locks, so the first one a run breaks may have arrived already
-     * worn and break early. A strain count that matches no level is reported as exactly that rather
-     * than rounded into a guess. The one thing that is certain either way is the reset: only an
-     * untrained character's break sends every plate home.
-     */
-    private String levelSeen() {
-        return Skill.fromStrainsPerPick(strainsPerPick)
-                .map(s -> " - that is " + s.name().toLowerCase() + " lockpicking")
-                .orElse(breakResetThePuzzle
-                        ? " - the puzzle reset, so the character is untrained"
-                        : " - no level breaks on that many, so that pick came in already worn");
+    /** The one solved-report line, from wherever the run concludes the lock is open. */
+    private void reportSolved() {
+        reporter.solved(strains, picksSpent(), strainsPerPick, breakResetThePuzzle);
     }
 
     private void unreadable(String when) {
-        System.out.println("Could not read the lock " + when + ". Is something covering it (a tooltip, "
-                + "the mouse cursor, a notification), or did the game move on?");
+        reporter.unreadable(when);
         view.dumpFrame("unreadable");
-    }
-
-    private static String name(int dir) {
-        return dir > 0 ? "left" : "right";
     }
 
     /** A plan as a compact list of {@code <plate><L|R>} moves, for the trace. */
@@ -1333,16 +1131,5 @@ public final class LockSession {
             sb.append(i > 0 ? " " : "").append(m.plate()).append(m.dir() > 0 ? "L" : "R");
         }
         return sb.append(']').toString();
-    }
-
-    private static String describe(Connection[] row) {
-        if (row.length == 0) return "nothing";
-        StringBuilder sb = new StringBuilder();
-        for (int j = 0; j < row.length; j++) {
-            if (j > 0) sb.append(", ");
-            sb.append("plate ").append(row[j].target())
-              .append(row[j].type() == Connection.Type.NORMAL ? " (normal)" : " (inverted)");
-        }
-        return sb.toString();
     }
 }

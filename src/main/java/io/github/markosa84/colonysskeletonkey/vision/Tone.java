@@ -285,7 +285,7 @@ public final class Tone {
         int[] histogram = new int[256];
         for (int y = box.y; y < box.y + box.height; y++) {
             for (int x = box.x; x < box.x + box.width; x++) {
-                histogram[LockReader.luminance(frame.getRGB(x, y))]++;
+                histogram[Pixels.luminance(frame.getRGB(x, y))]++;
             }
         }
         return histogram;
@@ -296,7 +296,7 @@ public final class Tone {
         int[] histogram = new int[256];
         for (int y = 0; y < img.getHeight(); y++) {
             for (int x = 0; x < img.getWidth(); x++) {
-                histogram[LockReader.luminance(img.getRGB(x, y))]++;
+                histogram[Pixels.luminance(img.getRGB(x, y))]++;
             }
         }
         return histogram;

@@ -10,12 +10,13 @@ import io.github.markosa84.colonysskeletonkey.solver.LockModel;
  * tool can be pointed at either without a line changing above the vision package.
  *
  * <p>There are two implementations, and they disagree about exactly one thing: <b>photometry</b>.
- * {@link LockReader} reads the lock with absolute pixel values fitted on one screen at one gamma, undone
- * on the way in by {@link Tone}; it is calibrated to the pixel and it is the shipped default.
- * {@link LatticeReader} reads it with ratios measured off the frame itself, so it holds up where the
- * first one's calibration does not - a wider gamma range, HDR frames a {@code Tone} curve cannot
- * express, small resolutions - at the cost of not yet matching it on the calibrated corpus. Both share
- * the measured geometry ({@link FanGeometry}); neither knows the other exists.
+ * {@link LatticeReader} - the <b>shipped default</b> - reads the lock with ratios measured off the
+ * frame itself, so it holds up across a wide gamma range, in HDR frames a {@code Tone} curve cannot
+ * express, and at small resolutions; it matches the reference on every labelled frame and reads HDR
+ * ones the reference cannot. {@link LockReader} reads the lock with absolute pixel values fitted on
+ * one screen at one gamma, undone on the way in by {@link Tone}; it is the pixel-calibrated reference
+ * and corpus gate, kept behind {@code --reader=legacy}. Both share the measured geometry
+ * ({@link FanGeometry}); neither knows the other exists.
  *
  * <p>The contract every implementation owes its callers:
  * <ul>

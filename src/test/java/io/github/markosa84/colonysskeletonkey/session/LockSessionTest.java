@@ -16,6 +16,7 @@ import io.github.markosa84.colonysskeletonkey.solver.Connection;
 import io.github.markosa84.colonysskeletonkey.solver.Cost;
 import io.github.markosa84.colonysskeletonkey.solver.LockModel;
 import io.github.markosa84.colonysskeletonkey.solver.LockSolver;
+import io.github.markosa84.colonysskeletonkey.solver.ModelRepair;
 import io.github.markosa84.colonysskeletonkey.solver.Move;
 import io.github.markosa84.colonysskeletonkey.solver.TestLocks;
 
@@ -424,7 +425,7 @@ class LockSessionTest {
                     r.name() + " must be unsolvable exactly as reported");
             int suspect = -1;
             for (int p = 0; p < m.n() && suspect < 0; p++) {
-                if (LockSession.singleEditRank(m, r.state(), p) != Integer.MAX_VALUE) {
+                if (ModelRepair.singleEditRank(m, r.state(), p) != Integer.MAX_VALUE) {
                     suspect = p;
                 }
             }
