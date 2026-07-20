@@ -1,5 +1,26 @@
 # Changelog
 
+## [1.5.0](https://github.com/markosa84/colonys-skeleton-key/compare/v1.4.0...v1.5.0) (2026-07-20)
+
+
+### Features
+
+* log each solved lock to captures/lock-history.txt ([01cde6e](https://github.com/markosa84/colonys-skeleton-key/commit/01cde6e7fd223aedb87388ba6c67ba40c33c197f))
+* log each solved lock to captures/lock-history.txt ([10283b4](https://github.com/markosa84/colonys-skeleton-key/commit/10283b4b9db5ada8607fc5f369e2b9a4e3eed8ee))
+
+
+### Refactoring
+
+* **session:** move LockSession's console prose into a SessionReporter seam ([37ebc80](https://github.com/markosa84/colonys-skeleton-key/commit/37ebc80fbf29e0c3cd7cf5664d752ce88272aa3e))
+* **solver:** extract model-repair math out of LockSession into ModelRepair ([53c0121](https://github.com/markosa84/colonys-skeleton-key/commit/53c0121adf59336e2e2ebcc5f0c593b804ad5878))
+* structural SOLID/DRY cleanups (readers, model-repair, session reporting) ([34f8da9](https://github.com/markosa84/colonys-skeleton-key/commit/34f8da901d2d436deb2a7ca2c61888fc7817b063))
+* **vision:** share reader primitives so LatticeReader stops depending on LockReader ([05db30d](https://github.com/markosa84/colonys-skeleton-key/commit/05db30dd776719d2bbfab96d098fb461fff47a35))
+
+
+### Documentation
+
+* **vision:** correct stale 'shipped default' reader claims ([9a8a034](https://github.com/markosa84/colonys-skeleton-key/commit/9a8a03464afa29bfc3e87983cc75e8956147cf61))
+
 ## [1.4.0](https://github.com/markosa84/colonys-skeleton-key/compare/v1.3.0...v1.4.0) (2026-07-19)
 
 
