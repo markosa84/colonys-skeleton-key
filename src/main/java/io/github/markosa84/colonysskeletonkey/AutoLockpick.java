@@ -107,17 +107,20 @@ public final class AutoLockpick {
                 () -> Win32.foregroundProcessName().equalsIgnoreCase(gameProcess)));
         KeySender keys = new KeySender(keyboard, 0); // the session homes the real cursor
         LockHistory history = new LockHistory(); // appends one line-block per solved lock
+        // Read once, here: the bundled catalogue plus everything this machine has already solved. From
+        // now on it lives in memory, and every solve below folds straight into it - so reloading a save
+        // and re-opening the same chest is recognised without restarting the tool.
+        LockCatalog catalog = new LockCatalog();
 
-        printBanner(gameProcess, dpi);
+        printBanner(gameProcess, dpi, catalog.size(), catalog.ambiguousKeys());
         if (dumping) {
-            System.out.println("--dump: F8 saves the game's view and the sidecar. Nothing is "
-                    + "probed, no key is sent, no lockpick is spent.");
+            System.out.println("--dump: F8 only saves a screenshot of the lock plus a report of "
+                    + "what the reader saw. No keys are sent, no lockpick is spent.");
         }
         if (!readerKind.equals(DEFAULT_READER)) {
-            System.out.println("--reader=" + readerKind + ": using the "
-                    + ("legacy".equals(readerKind) ? "old pixel-calibrated reader"
-                            : "lattice".equals(readerKind) ? "relative (tone-free) reader" : readerKind)
-                    + " instead of the default.");
+            System.out.println("--reader=" + readerKind + ": reading with the "
+                    + ("legacy".equals(readerKind) ? "old pixel-calibrated reader" : readerKind)
+                    + " instead of the default one.");
         }
         String warning = dpiWarning(awtScale());
         if (!warning.isEmpty()) {
@@ -150,7 +153,7 @@ public final class AutoLockpick {
                             "f8-" + LocalDateTime.now().format(LOG_STAMP) + ".log");
                     RunLog log = RunLog.open(logFile, System.out);
                     String describe = describeOrWhyNot(reader, screen.capture());
-                    LockSession session = new LockSession(view, keys, slider);
+                    LockSession session = new LockSession(view, keys, slider, catalog);
                     session.traceTo(log.detail()); // null-safe: no file, no trace
                     keyboard.reset(); // the recorder is reused across presses; record only this one
                     solveLogged(log, System.out, slider.telemetry(), Win32::foregroundProcessName,
@@ -160,8 +163,12 @@ public final class AutoLockpick {
                                 session.run();
                             });
                     if (session.solved()) {
-                        history.record(session.initialState(), session.connections(),
-                                keyboard.recorded());
+                        int[] opened = session.initialState();
+                        history.record(opened, session.connections(), keyboard.recorded(),
+                                session.observedSkill());
+                        // Straight into memory too, so the very next F8 on this chest recognises it -
+                        // the history file is only ever re-read at the next startup.
+                        catalog.remember(opened.length, opened, session.connections());
                     }
                 }
             }
@@ -486,6 +493,10 @@ public final class AutoLockpick {
      * The build this is, for the banner and every run log - the first thing a bug report needs. Read
      * from the jar manifest ({@code Implementation-Version}, set by the build); {@code "dev"} when run
      * from classes with no manifest ({@code gradlew run}, the tests).
+     *
+     * <p>A released artifact carries the release-please version ({@code 1.5.0}); a jar built from the
+     * working tree carries the release it descends from plus {@code +local}, so a report from a
+     * self-built copy cannot be mistaken for one from the download.
      */
     static String version() {
         String v = AutoLockpick.class.getPackage().getImplementationVersion();
@@ -523,21 +534,44 @@ public final class AutoLockpick {
         return true;
     }
 
-    static void printBanner(String gameProcess, String dpi) {
-        System.out.println("=== The Colony's Skeleton Key " + version() + " ===");
-        System.out.println("Nothing to configure: broken picks are read off the lockpick counter, so "
-                + "the tool works at any lockpicking skill and notices if you train it.");
-        System.out.println("Play at any resolution, windowed or borderless: each F8 measures the "
-                + "game's window (DPI awareness: " + dpi + ") and scales the 4K calibration onto it. "
-                + "Keys are sent only while " + gameProcess + " owns the focused window.");
-        System.out.println("Open a lock in-game, keep it focused, and press F8.");
-        System.out.println("It learns the plate connections and opens the lock, without ever resetting.");
-        System.out.println("Each press starts from scratch. Quit with Ctrl-C.");
-        System.out.println("NOTE: the hotkey is observed, not swallowed - the game receives F8 too.");
-        System.out.println("Check F8 is unbound in the game's controls menu before you start.");
-        System.out.println("Reads " + LockModel.MIN_PLATES + "-" + LockModel.MAX_PLATES + " plate locks "
-                + "from the lock's own contrast, so it holds up at any gamma, in HDR, and at any size - "
-                + "every one verified against labelled frames from the real game.");
-        System.out.println("=================================");
+    /**
+     * The startup banner: what the tool does, the two things the player has to do, and the facts a
+     * bug report needs (the build, the process the focus gate waits for, the DPI awareness we got).
+     *
+     * <p>Written for a player, not a maintainer - the internals it used to recite (the 4K
+     * calibration, reading the lock's own contrast, the counter the broken picks come off) are in
+     * README.md and docs/INTERNALS.md, and every run's own diagnostics are in its {@link RunLog}.
+     * Hard-wrapped so a narrow console does not fold it into a wall of text.
+     */
+    static void printBanner(String gameProcess, String dpi, int knownLocks, int ambiguousKeys) {
+        String title = "=== The Colony's Skeleton Key " + version() + " ===";
+        System.out.println(title);
+        System.out.println(String.format(Locale.ROOT, """
+                Opens Gothic 1 Remake locks for you: it works out how the plates are linked,
+                then solves the lock - without ever resetting it. It remembers %d lock(s) it has
+                opened before and skips straight to solving those.%s
+
+                  1. Unbind F8 in the game's controls menu - the game still receives the key.
+                  2. Open a lock in-game, keep the game focused, and press F8.
+
+                Nothing to configure: %d-%d plates, any resolution, windowed or fullscreen, any
+                gamma, HDR, any lockpicking skill. Broken picks are expected, and every press
+                starts from scratch - if a run stops early, just press F8 again.
+                Keys are sent only while %s owns the focused window.
+                Quit with Ctrl-C.   (DPI awareness: %s)""",
+                knownLocks, sharedStarts(ambiguousKeys),
+                LockModel.MIN_PLATES, LockModel.MAX_PLATES, gameProcess, dpi));
+        System.out.println("=".repeat(title.length()));
+    }
+
+    /**
+     * A lock is looked up by the offsets it shows, and two chests can show the same ones - so this
+     * many of them have to be learned the ordinary way. Silent when there are none, which is the
+     * usual case; worth a line when there are, because it only ever grows.
+     */
+    private static String sharedStarts(int ambiguousKeys) {
+        return ambiguousKeys == 0 ? "" : String.format(Locale.ROOT,
+                "%n(%d starting position(s) are shared by two chests, so those are learned as usual.)",
+                ambiguousKeys);
     }
 }

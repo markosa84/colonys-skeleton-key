@@ -10,8 +10,10 @@ import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.Arrays;
 import java.util.Locale;
+import java.util.Optional;
 import java.util.StringJoiner;
 
+import io.github.markosa84.colonysskeletonkey.session.Skill;
 import io.github.markosa84.colonysskeletonkey.solver.Connection;
 
 /**
@@ -43,8 +45,8 @@ final class LockHistory {
     }
 
     /** Appends the record for one solved lock. Prints where it went; never throws. */
-    void record(int[] initialState, Connection[][] conn, String keys) {
-        String entry = format(initialState, conn, keys);
+    void record(int[] initialState, Connection[][] conn, String keys, Optional<Skill> skill) {
+        String entry = format(initialState, conn, keys, skill);
         try {
             Path parent = file.getParent();
             if (parent != null) {
@@ -57,10 +59,17 @@ final class LockHistory {
         }
     }
 
-    private String format(int[] initialState, Connection[][] conn, String keys) {
+    /**
+     * The header carries the lockpicking level when the run happened to see one, because the level
+     * changes the lock itself: Trained removes one plate connection and Master removes another. An
+     * entry that does not say is one where no pick broke, so nothing was observed - and it is left
+     * blank rather than assumed, since a guess here would be a guess about the model.
+     */
+    private String format(int[] initialState, Connection[][] conn, String keys, Optional<Skill> skill) {
         return String.format(Locale.ROOT,
-                "%s | %d plates%n  init  %s%n  conn  %s%n  keys  %s%n%n",
+                "%s | %d plates%s%n  init  %s%n  conn  %s%n  keys  %s%n%n",
                 LocalDateTime.now(clock).format(STAMP), initialState.length,
+                skill.map(s -> " | " + s.name().toLowerCase(Locale.ROOT)).orElse(""),
                 Arrays.toString(initialState), describeConnections(conn), keys);
     }
 

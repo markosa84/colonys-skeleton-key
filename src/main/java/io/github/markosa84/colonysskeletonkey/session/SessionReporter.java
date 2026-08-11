@@ -81,6 +81,20 @@ final class SessionReporter {
         pleaseReportSavedFiles();
     }
 
+    /**
+     * The same dead end, reached by a run that recalled a model - where it means something quite
+     * different, and must not send the player after a reader that was working. A lock is looked up by
+     * the offsets it shows, and two chests can show the same ones; the memory was of the other one.
+     * The frame is saved, but as a record of the collision, not as evidence against the reader.
+     */
+    void falseRecallGiveUp() {
+        System.out.println("Nothing moved, and I had recognised this lock from one I opened "
+                + "before - so the memory was of a different chest that happens to start at the "
+                + "same offsets, and I could not recover from it. The lock on screen was most "
+                + "likely read correctly. Slide any plate one step by hand and press F8 again, "
+                + "and it will learn this chest from scratch.");
+    }
+
     void unsolvableModelGiveUp() {
         System.out.println("The connections I learned do not add up to a lock that opens, "
                 + "but the game only ever gives you locks that do - so I misread a plate "
@@ -103,15 +117,22 @@ final class SessionReporter {
 
     // --- step() ---
 
+    /**
+     * A broken pick. {@code rowDropped} says the strain that broke it also disproved a connection -
+     * so the usual reassurance would contradict the line printed just above, and the honest claim is
+     * the narrower one: what the lock has actually been seen doing is never in doubt.
+     */
     void pickBroke(int strainsPerPick, int observedBreaks, boolean resetThisBreak, boolean everReset,
-            int[] cur) {
+            int[] cur, boolean rowDropped) {
         System.out.println("  the pick broke after " + strainsPerPick + " strain(s)"
                 + levelSeen(strainsPerPick, everReset)
                 + " (" + observedBreaks + " so far)"
                 + (resetThisBreak
                     ? "; the puzzle reset to " + Arrays.toString(cur)
                     : "; the lock is untouched at " + Arrays.toString(cur))
-                + ". Keeping every connection learned so far.");
+                + (rowDropped
+                    ? ". Keeping everything the lock has actually shown me."
+                    : ". Keeping every connection learned so far."));
     }
 
     void refusedLegalMove(int p) {
@@ -125,9 +146,60 @@ final class SessionReporter {
                 + " so far).");
     }
 
+    /**
+     * A strain that settled a connection outright. Only one plate sat where this slide could have
+     * pushed it off, so there was nothing to guess: the strain was paid for, and it bought a fact.
+     */
+    void deducedFromStrain(int p, Connection only) {
+        System.out.println("  ...and that says what: plate " + p + " drags "
+                + describe(new Connection[] {only}) + " - nothing else could have refused the move.");
+    }
+
     void willNotSlideYet(int p, int dir, int strains) {
         System.out.println("  plate " + p + " will not slide " + name(dir) + " yet: it must drag a "
                 + "plate already at the end of its track (strain " + strains + ").");
+    }
+
+    // --- locks opened before ---
+
+    /**
+     * A lock recognised from one opened before. Adoption always completes the model - it fills every
+     * row not already probed - so there is never anything left to probe afterwards.
+     */
+    void recognised(String why, int rows) {
+        System.out.println("  " + why + ": " + rows + " connection row(s) recalled, so there is "
+                + "nothing to probe. Every move is still checked against them.");
+    }
+
+    /**
+     * A remembered row the lock disagreed with. Usually not a mistake at all: the catalogue is
+     * recorded untrained, and training removes a plate connection - so a row that comes back one
+     * connection lighter is the character having improved, not the memory having rotted.
+     */
+    void recallCorrected(int p, Connection[] remembered, Connection[] actual) {
+        System.out.println("  plate " + p + " drags " + describe(actual) + ", not "
+                + describe(remembered) + " as remembered"
+                + (fewerThan(actual, remembered)
+                    ? " - one connection fewer, which is what trained or master lockpicking does to a"
+                        + " lock. Taking what it just did."
+                    : ". Taking what it just did."));
+    }
+
+    /** True when {@code actual} is {@code remembered} with connections removed and none added. */
+    private static boolean fewerThan(Connection[] actual, Connection[] remembered) {
+        return actual.length < remembered.length && Connection.rowContains(remembered, actual);
+    }
+
+    /**
+     * A remembered model the lock has disproved in the one direction training cannot explain, so it
+     * belongs to a different chest that starts at the same offsets. Everything still resting on it
+     * goes; everything this run saw for itself stays.
+     */
+    void recallWrongChest(int rowsDropped) {
+        System.out.println("  ...and training only ever removes a connection, so this memory is not "
+                + "this chest at all - it is a different one that starts at the same offsets. "
+                + "Dropping the " + rowsDropped + " row(s) I had only remembered and learning this "
+                + "lock properly. Nothing I have watched the lock do is affected.");
     }
 
     // --- learn() / recovery / hidden rows / discovery ---

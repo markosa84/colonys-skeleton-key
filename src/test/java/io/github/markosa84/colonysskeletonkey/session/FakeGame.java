@@ -27,6 +27,15 @@ final class FakeGame implements LockView, MoveExecutor, CursorKeys {
     int breaks;
     int endCursorCalls;
     final List<String> dumps = new ArrayList<>();
+    /** Every move played, in order - so a test can prove a refused slide is never sent twice. */
+    final List<Move> played = new ArrayList<>();
+
+    /**
+     * Strains the pick in hand has already taken elsewhere. A lockpick carries its damage between
+     * locks, so the first one a run breaks may arrive part-worn and break sooner than the level says
+     * - which is what the live 4-plate failure did, breaking on its very first strain.
+     */
+    int wornBy;
 
     /** Play number (1-based) at which one legal move is falsely reported as a strain, or -1. */
     int lieAtPlay = -1;
@@ -83,6 +92,7 @@ final class FakeGame implements LockView, MoveExecutor, CursorKeys {
     @Override
     public Observation play(int n, int[] cur, Move move) {
         plays++;
+        played.add(move);
         cursor = move.plate(); // the executor navigates to the plate before sliding
         if (plays == lieAtPlay) {
             return new Observation(Outcome.UNCHANGED, cur.clone(), false); // a phantom strain
@@ -96,7 +106,7 @@ final class FakeGame implements LockView, MoveExecutor, CursorKeys {
             return new Observation(Outcome.MOVED, mask(state), false);
         }
         strains++;
-        if (strains % skill.mistakes() == 0) {
+        if ((strains + wornBy) % skill.mistakes() == 0) {
             breaks++;
             cursor = n - 1; // the game re-homes the selection when a pick breaks
             if (skill.resetsOnBreak()) {

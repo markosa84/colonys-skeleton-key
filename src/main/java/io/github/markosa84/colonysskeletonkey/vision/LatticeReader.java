@@ -40,7 +40,10 @@ import io.github.markosa84.colonysskeletonkey.solver.LockModel;
  *   <li><b>Tracing</b> a hole is asking "plate, or not plate?", so it is judged against <b>the plate the
  *       pixel is sitting on</b> ({@code metalAt}). The plates are not evenly lit - at gamma 1.2 the
  *       dimmest reads 0.46 of the brightest - and against the lock's brightest steel, a dim plate's own
- *       gate lands below its own metal and its holes bleed out into it.</li>
+ *       gate lands below its own metal and its holes bleed out into it. Which pixels <i>are</i> that
+ *       plate is the subtle half: the strip a row is measured in is as wide as the widest row can be,
+ *       and a plate that has slid does not fill it, so the measurement has to ignore what lies past the
+ *       plate's end rather than average it in ({@code Fan.metalAtDepth}).</li>
  *   <li><b>Believing</b> a hole is asking "how black is what shows through?", and that is judged against
  *       <b>the whole frame's range</b>. The room behind the lock is exactly as black behind a dim plate
  *       as a bright one, so this test must not be scaled by the plate. Getting these two the wrong way
@@ -76,6 +79,10 @@ import io.github.markosa84.colonysskeletonkey.solver.LockModel;
  * what a dark or HDR frame takes - makes a 6-plate lock read as a 4-plate one, and the session then
  * drives a model with the wrong number of plates into the walls. Here a plate is what it physically is:
  * a row of six holes in lit steel, which nothing else in a room is. Lose a pin and nothing happens.
+ *
+ * <p>And lose a <b>row</b> and almost nothing happens either: a fan may carry one row whose holes did
+ * not add up and still be a lock, because the count is carried by the fan's ends, not by its middle.
+ * That row reads {@link #UNKNOWN} and the session recovers it. See {@link #MAX_UNRESOLVED_ROWS}.
  */
 public final class LatticeReader implements LockAnalyzer {
 
@@ -97,8 +104,18 @@ public final class LatticeReader implements LockAnalyzer {
      * evenly lit, so it has to be asked of each plate in turn. At gamma 1.2 the dimmest plate reads
      * 0.46 of the brightest: judged against the lock's brightest steel its own gate lands at luminance
      * 43 while its metal sits at 44, and its holes bleed straight out into it.
+     *
+     * <p>It was <b>0.58</b> while {@code Fan.metalAtDepth} answered with the median of the whole
+     * sampling strip - a number that runs 1.2x to 1.7x below the plate's real steel, by however much of
+     * the strip is holes and off-plate room. So 0.58 was never 0.58 of a plate; it was 0.58 of a
+     * contaminated estimate, and when the estimate was fixed every gate in the reader moved with it.
+     * Re-measured against the honest one over 78 frames (the census, both ends of the gamma slider, the
+     * HDR corpus, the resolution sweep, the dark 1440p reports and the 7-plate frame this was all found
+     * on), <b>every value from 0.41 to 0.53 reads all 78 correctly</b>; 0.56 and above loses a hole row
+     * in the dark 1440p cellar, 0.38 and below loses seven frames. 0.47 is the middle of that band, with
+     * about 0.06 of headroom on each side. Don't re-tune it without re-running that sweep.
      */
-    private static final double HOLE_DARK = 0.58;
+    private static final double HOLE_DARK = 0.47;
 
     /**
      * How deep the void has to be - the darkest pixel, and the mean - <b>against the whole frame's
@@ -151,6 +168,29 @@ public final class LatticeReader implements LockAnalyzer {
 
     /** Half-height of the strip a plate's metal is read in - tall enough to clear the hole row. */
     private static final double PLATE_HALF_HEIGHT = 0.60;
+
+    /**
+     * How many rows of a fan may be lit steel whose holes did not add up, and still leave the fan a
+     * lock.
+     *
+     * <p>Everything else in the tool already tolerates a row it could not resolve: {@link #readState}
+     * answers {@link #UNKNOWN} rather than guessing, {@code LockModel.isComplete} exists to ask about
+     * it, and {@code LockSession} has a whole apparatus for it - it undoes and retries a probe whose
+     * observation came back unreadable, fills a row from the model while solving, and nudges an
+     * unreadable state readable at session start. Counting plates was the one place that demanded
+     * perfection, so a lock never reached any of it: <b>one bad row out of seven cost the whole
+     * lock</b>, and the player was told there was no lock at all (a 7-plate chest whose back plate
+     * walked 3 of 6 holes, and a 5-plate one whose middle row walked 1 of 6).
+     *
+     * <p>It does not weaken the plate count, because the count was never carried by the middle of the
+     * fan - it is carried by the <b>ends</b>. The fans of {@code n} and {@code n + 2} share a lattice,
+     * so what separates a 5-plate lock from the middle of a 7-plate one is whether there is lit steel
+     * one step further out; and an even-plate lock's plates sit on the half steps between an odd one's,
+     * so a wrong-parity fan lands in the gaps between plates, which hold no holes at all - six
+     * unresolved rows, not one. {@link RowFit#isLit()} therefore stays strict for every row, and so
+     * does the beyond-check.
+     */
+    private static final int MAX_UNRESOLVED_ROWS = 1;
 
     private final FanGeometry geo;
     private final double holeMinArea, holeMaxArea;
@@ -212,7 +252,18 @@ public final class LatticeReader implements LockAnalyzer {
          * fan: both can fake a hole or two, but neither is lit steel.
          */
         public boolean isPlate() {
-            return walked == HOLES && lit >= LIT_PLATE;
+            return walked == HOLES && isLit();
+        }
+
+        /**
+         * Is there a plate's worth of lit steel at this depth at all - whatever its holes came to?
+         *
+         * <p>This is the half of {@link #isPlate()} that carries the <b>plate count</b>, and it is the
+         * half that never needs relaxing: the casing and the room are not lit steel however the holes
+         * read. See {@link LatticeReader#MAX_UNRESOLVED_ROWS}.
+         */
+        public boolean isLit() {
+            return lit >= LIT_PLATE;
         }
 
         public int offset() {
@@ -223,18 +274,28 @@ public final class LatticeReader implements LockAnalyzer {
     /**
      * Plate count, from the hole rows alone - no pins anywhere in it.
      *
-     * <p>The largest {@code n} whose every row is a plate and which has no plate one step past either
-     * end. That end check is what {@link LockReader} needs {@code plateBeyond} for, and here it is the
-     * same question asked of the same thing, so it costs nothing extra.
+     * <p>The largest {@code n} whose every row is lit steel, at most
+     * {@link #MAX_UNRESOLVED_ROWS} of which failed to walk six holes, and which has no <b>plate</b>
+     * one step past either end. That end check is what {@link LockReader} needs {@code plateBeyond}
+     * for, and here it is the same question asked of the same thing, so it costs nothing extra.
+     *
+     * <p>The two tests are deliberately not the same strictness. The fan's own rows may carry one
+     * row the reader could not resolve - {@link #readState} reports it {@link #UNKNOWN} and the
+     * session recovers it. The <b>beyond</b> check may not: it is only ever allowed to take a lock
+     * away, so it must see a whole six-hole row in lit steel before it does, or a lit arch behind a
+     * genuine 5-plate lock would talk the lock out of existence.
      */
     public int detectPlateCount(BufferedImage img) {
         Fan fan = new Fan(img);
         for (int n = LockModel.MAX_PLATES; n >= LockModel.MIN_PLATES; n--) {
-            boolean all = true;
-            for (int i = 0; i < n && all; i++) {
-                all = fan.fit(n, i).isPlate();
+            boolean lit = true;
+            int unresolved = 0;
+            for (int i = 0; i < n; i++) {
+                RowFit row = fan.fit(n, i);
+                lit &= row.isLit();
+                unresolved += row.isPlate() ? 0 : 1;
             }
-            if (!all) {
+            if (!lit || unresolved > MAX_UNRESOLVED_ROWS) {
                 continue;
             }
             // Only a 4- or 5-plate fan can be the middle of a bigger one; 6 and 7 have no n+2.
@@ -267,21 +328,45 @@ public final class LatticeReader implements LockAnalyzer {
                 + " every gate below is a fraction of one of those, never a number of its own\n",
                 fan.plateLevel, fan.black));
         out.append("holes:   ").append(fan.holes.size()).append(" hole-sized voids in the fan crop\n");
+        out.append("         (steel a/b: a is the plate this row is cut into, b the plain median of "
+                + "the whole sampling strip. b far below a means the strip ran off the end of that "
+                + "plate, which is what b alone used to be read as the plate's own brightness.)\n");
         for (int n = LockModel.MAX_PLATES; n >= LockModel.MIN_PLATES; n--) {
             out.append(String.format(Locale.ROOT, "  %d plates:", n));
             for (int i = 0; i < n; i++) {
                 RowFit f = fan.fit(n, i);
-                out.append(String.format(Locale.ROOT, " [%d: %d/6 holes, lit %.2f%s]",
-                        i, f.walked(), f.lit(), f.isPlate() ? "" : " NOT A ROW"));
+                double[] columns = fan.columnMedians((n - 1) / 2.0 - i);
+                out.append(String.format(Locale.ROOT, " [%d: %d/6 holes, lit %.2f, steel %.0f/%.0f%s]",
+                        i, f.walked(), f.lit(), brightMedian(columns), spanMedian(columns), verdict(f)));
             }
             out.append('\n');
         }
         int n = detectPlateCount(img);
         out.append(n < 0
-                ? "  -> No lock: no run of 4-7 rows of six holes in lit steel. Either the box is not "
-                        + "over the lock (the viewport is wrong), or the rows are not resolving."
+                ? "  -> No lock: no run of 4-7 rows of lit steel, all but at most one of them a full "
+                        + "row of six holes. Either the box is not over the lock (the viewport is "
+                        + "wrong), or two or more rows are not resolving."
                 : "  -> " + n + " plates, offsets " + Arrays.toString(readState(img, n)));
         return out.toString();
+    }
+
+    /**
+     * What a row came to, in a word.
+     *
+     * <p>The three failures are worth telling apart in a report, and {@code lit} alone will not do it:
+     * a strip centred on the <b>gap</b> between two plates clips their steel at its edges, so the
+     * bright population finds metal there and the gap can read as lit as a plate. It is the
+     * <b>holes</b> that separate them - nothing but a plate has six - which is the same fact the plate
+     * count itself rests on.
+     */
+    private static String verdict(RowFit row) {
+        if (row.isPlate()) {
+            return "";
+        }
+        if (!row.isLit()) {
+            return " NOT A ROW";
+        }
+        return row.walked() == 0 ? " NO HOLES" : " ROW UNRESOLVED";
     }
 
     /**
@@ -293,26 +378,9 @@ public final class LatticeReader implements LockAnalyzer {
 
         private final int x0, y0, w, h;
         private final int[] lum;
-        /**
-         * Where this frame separates its plates from the voids in them, and the one number every hole
-         * gate is a fraction of.
-         *
-         * <p>It is Otsu's threshold - but taken over the <b>fan band alone</b>, the strip the seven
-         * hole rows actually run through, and that restriction is the whole trick. Over the full crop
-         * the vote is carried by the dark room the lock is sitting in, so the split comes back
-         * separating <i>the room from the lock</i> (luminance 72 at gamma 1.2, where the dimmest plate
-         * is at 43 and would count as a hole). Over the band, the only two populations left are the
-         * steel and the holes cut in it - which is the question being asked.
-         *
-         * <p>This is what a fixed fraction cannot do. The gamma slider is a power curve, so the gap
-         * between a plate and its holes does not scale: at the calibrated gamma the plates sit at
-         * 181-234 and the holes at 0-50, and 105 splits them; at gamma 1.2 the plates are at 43-94 and
-         * the holes at 0-10, and the splitting number is ~25 - not 0.45 of anything. A ratio of the
-         * white end lands at 43, inside the plate. Otsu finds the gap because it looks for the gap.
-         */
         /** The room the holes show through - the dark end of this frame's own range. */
         private final double black;
-        /** The lock's own lit steel, for the pop signal and the lit-plate test. */
+        /** The brightest plate of this lock: what the void gates and the lit-plate test are against. */
         private final double plateLevel;
         private final List<double[]> holes;
         private final double[][] metal = new double[LockModel.MAX_PLATES + 1][];
@@ -541,12 +609,37 @@ public final class LatticeReader implements LockAnalyzer {
         /**
          * How bright the metal at {@code depth} fan steps is: a plate, or the lock's casing, or the room.
          *
-         * <p>Medians, twice over - down each column of a strip tall enough to clear the holes, and then
-         * across the row. Never a maximum: a plate carries specular streaks, and at gamma 1.2 they put
-         * the "steel" at luminance 193 when the steel is really at 46. A highlight is still a highlight
-         * however dark the room, so it has to be outvoted rather than trusted.
+         * <p>A median down each column of a strip tall enough to clear the holes - never a maximum: a
+         * plate carries specular streaks, and at gamma 1.2 they put the "steel" at luminance 193 when
+         * the steel is really at 46. A highlight is still a highlight however dark the room, so it has
+         * to be outvoted rather than trusted.
+         *
+         * <p>Across the row, though, a plain median is <b>wrong</b>, and it is the bug this method was
+         * written to fix. The strip is {@code 2 * rowMaxDx + 1} px wide because a row can be that wide,
+         * but a given row usually is not: {@link FanGeometry#ROW_MAX_DX} is sized for the widest row on
+         * screen, the plates recede, and - the part that bites - <b>a plate slides</b>, so how much of
+         * the strip lands past the end of it depends on that plate's offset. On a 7-plate lock whose
+         * back plate sat at +3, the plate ended 170px right of its pin and the remaining 175px of strip
+         * read a median of 8 - the black room behind the lock. A quarter of the strip off the plate,
+         * plus the fifth of it that is the six holes, outvoted the steel: the median came back
+         * <b>162</b> where the steel between the holes reads 210-255. The tracing gate collapsed with
+         * it, three of that row's six holes traced as fragments or 8px under the area floor, the row
+         * walked 3/6, and the whole lock was reported as no lock at all.
+         *
+         * <p>So take <b>the bright population</b> instead: split the column medians in two with Otsu
+         * and answer with the median of the upper class. It is parameter-free on purpose - what varies
+         * from row to row is precisely <i>how much</i> of the strip is not plate, so a fixed percentile
+         * would be one more number fitted to one screen, which is the thing this reader exists not to
+         * do. It is still a median of a population, so a specular streak is still outvoted; and where
+         * the strip is all one thing (a row of pure room, a row of unbroken steel) Otsu finds no split
+         * worth making and the answer is that one thing's median, as before.
          */
         double metalAtDepth(double depth) {
+            return brightMedian(columnMedians(depth));
+        }
+
+        /** The median luminance of every column of the strip the row at {@code depth} runs through. */
+        double[] columnMedians(double depth) {
             double[] rowPin = geo.rowPinAtDepth(depth);
             double slope = FanGeometry.slopeAtDepth(depth);
             int span = 2 * geo.rowMaxDx + 1;
@@ -556,8 +649,7 @@ public final class LatticeReader implements LockAnalyzer {
                 double yr = rowPin[1] + (xr - rowPin[0]) * slope;
                 tops[k] = column(xr, yr, plateHalf);
             }
-            Arrays.sort(tops);
-            return tops[span / 2];
+            return tops;
         }
 
         /** The median luminance of one column of the strip, in crop coordinates (solid off-crop). */
@@ -579,6 +671,95 @@ public final class LatticeReader implements LockAnalyzer {
             Arrays.sort(slice);
             return slice[n / 2];
         }
+    }
+
+    /**
+     * The median of the brighter of the two populations these levels fall into - the steel, where the
+     * levels are a row's column medians and the rest of them are its holes and whatever lies past the
+     * end of the plate. See {@code Fan.metalAtDepth}, which is the whole reason this exists.
+     *
+     * <p>Every value is a median of pixel luminances, so it is an integer 0..255 and the split can be
+     * found exactly on a 256-bin histogram.
+     */
+    static double brightMedian(double[] levels) {
+        int[] hist = histogramOf(levels);
+        int split = otsu(hist);
+        long bright = 0;
+        for (int v = split + 1; v < hist.length; v++) {
+            bright += hist[v];
+        }
+        if (bright == 0) {
+            // One population, so there was nothing to separate: the answer is its own median, which
+            // is what this method used to return unconditionally.
+            return median(hist);
+        }
+        long want = (bright + 1) / 2;
+        long seen = 0;
+        for (int v = split + 1; v < hist.length; v++) {
+            seen += hist[v];
+            if (seen >= want) {
+                return v;
+            }
+        }
+        return hist.length - 1;
+    }
+
+    /**
+     * Otsu's threshold: the level that splits the histogram into the two populations with the most
+     * variance between them, returned as the <b>last level of the darker class</b>.
+     *
+     * <p>It looks for the gap rather than assuming where it is, which is what a fixed fraction cannot
+     * do - and it is the same argument that put the gamma probe's split at the midpoint of the panel's
+     * two measured plateaus rather than at a constant.
+     */
+    private static int otsu(int[] hist) {
+        long total = 0;
+        long sum = 0;
+        for (int v = 0; v < hist.length; v++) {
+            total += hist[v];
+            sum += (long) v * hist[v];
+        }
+        long darkWeight = 0;
+        long darkSum = 0;
+        double best = -1;
+        int split = 0;
+        for (int v = 0; v < hist.length; v++) {
+            darkWeight += hist[v];
+            darkSum += (long) v * hist[v];
+            long litWeight = total - darkWeight;
+            if (darkWeight == 0) {
+                continue;
+            }
+            if (litWeight == 0) {
+                break;
+            }
+            double darkMean = (double) darkSum / darkWeight;
+            double litMean = (double) (sum - darkSum) / litWeight;
+            double between = (double) darkWeight * litWeight * (darkMean - litMean) * (darkMean - litMean);
+            if (between > best) {
+                best = between;
+                split = v;
+            }
+        }
+        return split;
+    }
+
+    /** The median level of a histogram. */
+    private static double median(int[] hist) {
+        return percentile(hist, 0.5);
+    }
+
+    /** The plain median of these levels - what {@link #brightMedian} is worth comparing against. */
+    static double spanMedian(double[] levels) {
+        return median(histogramOf(levels));
+    }
+
+    private static int[] histogramOf(double[] levels) {
+        int[] hist = new int[256];
+        for (double level : levels) {
+            hist[Math.max(0, Math.min(255, (int) Math.round(level)))]++;
+        }
+        return hist;
     }
 
     /** The luminance the given fraction of the crop's pixels fall below. */

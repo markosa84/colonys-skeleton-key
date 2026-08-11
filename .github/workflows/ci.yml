@@ -2,8 +2,8 @@
 #
 # The whole suite runs here, the reader's calibration included: the labelled frames are in the
 # repository, LockReader is pure frame analysis, and the tests are headless. So a green run means
-# the reader has been verified against all 217 frames on a machine that is not the author's - which
-# is the only independent check this project has. The frame-driven classes fail rather than skip
+# the reader has been verified against all 226 labelled frames on a machine that is not the author's -
+# which is the only independent check this project has. The frame-driven classes fail rather than skip
 # when the frames are missing, so the gate cannot quietly disappear.
 name: ci
 

@@ -5,10 +5,12 @@ import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.util.Optional;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import io.github.markosa84.colonysskeletonkey.session.Skill;
 import io.github.markosa84.colonysskeletonkey.solver.Connection;
 
 import static io.github.markosa84.colonysskeletonkey.solver.Connection.Type.INVERTED;
@@ -35,7 +37,7 @@ class LockHistoryTest {
         };
 
         Stdout.capturing(() -> new LockHistory(file, AT)
-                .record(new int[] {3, -1, 2, 0, -3, 1}, conn, "SSSSSAADW"));
+                .record(new int[] {3, -1, 2, 0, -3, 1}, conn, "SSSSSAADW", Optional.empty()));
 
         assertEquals(String.join("\n",
                 "2026-07-12 10:20:30 | 6 plates",
@@ -45,13 +47,29 @@ class LockHistoryTest {
                 "", ""), normalize(file));
     }
 
+    /**
+     * When a broken pick did reveal the level, it goes in the header - because the level changes the
+     * lock, not just the pick: Trained removes one plate connection and Master removes another. A
+     * model recorded untrained is the maximal one, and only a maximal model is safe to recall freely.
+     */
+    @Test
+    void theLockpickingLevelIsRecordedWhenTheRunActuallySawIt(@TempDir Path dir) throws Exception {
+        Path file = dir.resolve("lock-history.txt");
+
+        Stdout.capturing(() -> new LockHistory(file, AT)
+                .record(new int[] {0, 0, 0, 0}, new Connection[4][], "A", Optional.of(Skill.UNTRAINED)));
+
+        assertTrue(normalize(file).startsWith("2026-07-12 10:20:30 | 4 plates | untrained"),
+                normalize(file));
+    }
+
     @Test
     void nothingDraggingReadsAsNone(@TempDir Path dir) throws Exception {
         Path file = dir.resolve("lock-history.txt");
         Connection[][] conn = {{}, {}, {}, {}};
 
         Stdout.capturing(() -> new LockHistory(file, AT)
-                .record(new int[] {0, 0, 0, 0}, conn, "SSSS"));
+                .record(new int[] {0, 0, 0, 0}, conn, "SSSS", Optional.empty()));
 
         assertTrue(normalize(file).contains("  conn  (none)"), normalize(file));
     }
@@ -61,8 +79,8 @@ class LockHistoryTest {
         Path file = dir.resolve("lock-history.txt");
         LockHistory history = new LockHistory(file, AT);
 
-        Stdout.capturing(() -> history.record(new int[] {1, -1, 1, -1}, new Connection[4][], "AADD"));
-        Stdout.capturing(() -> history.record(new int[] {2, 2, -1}, new Connection[3][], "WWSS"));
+        Stdout.capturing(() -> history.record(new int[] {1, -1, 1, -1}, new Connection[4][], "AADD", Optional.empty()));
+        Stdout.capturing(() -> history.record(new int[] {2, 2, -1}, new Connection[3][], "WWSS", Optional.empty()));
 
         String got = normalize(file);
         assertTrue(got.indexOf("AADD") < got.indexOf("WWSS"), "the first entry must survive: " + got);
@@ -76,7 +94,7 @@ class LockHistoryTest {
         Path impossible = blocker.resolve("captures").resolve("lock-history.txt");
 
         String log = Stdout.capturing(() -> new LockHistory(impossible, AT)
-                .record(new int[] {0}, new Connection[1][], ""));
+                .record(new int[] {0}, new Connection[1][], "", Optional.empty()));
 
         assertTrue(log.contains("could not append"), log);
     }
@@ -87,7 +105,7 @@ class LockHistoryTest {
         Path file = dir.resolve("lock-history.txt");
         Connection[][] conn = {null, {new Connection(0, NORMAL)}};
 
-        Stdout.capturing(() -> new LockHistory(file, AT).record(new int[] {0, 0}, conn, "A"));
+        Stdout.capturing(() -> new LockHistory(file, AT).record(new int[] {0, 0}, conn, "A", Optional.empty()));
 
         assertTrue(normalize(file).contains("  conn  0:?  1:0N"), normalize(file));
     }

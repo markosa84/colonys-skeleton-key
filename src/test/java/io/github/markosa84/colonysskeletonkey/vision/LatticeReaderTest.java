@@ -1,6 +1,9 @@
 package io.github.markosa84.colonysskeletonkey.vision;
 
+import java.awt.Rectangle;
 import java.awt.image.BufferedImage;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.stream.Stream;
 
@@ -9,6 +12,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
+
+import io.github.markosa84.colonysskeletonkey.solver.LockModel;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -103,6 +108,58 @@ class LatticeReaderTest {
         assertArrayEquals(expected, reader.readState(img, expected.length), frame + ": offsets");
     }
 
+    /**
+     * The 7-plate chest that was reported as "no lock detected" while every pixel of it was fine.
+     *
+     * <p>It is the frame that showed a plate's steel could not be measured as the median of the
+     * sampling strip: the back plate sat at +3, a quarter of its strip lay past the end of the plate
+     * on black room, and the median came back 162 where the steel reads 210-255. Three of that row's
+     * six holes then traced too thin to survive the blob gates and the row walked 3/6, which cost the
+     * whole lock. So this pins two things at once - {@code brightMedian} measuring the plate rather
+     * than the strip, and {@code HOLE_DARK} re-referenced to it - and it must read all seven rows,
+     * not merely find seven plates.
+     */
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("stripOffPlateFrames")
+    void readsTheChestWhoseStripRanOffThePlate(String frame, Viewport viewport, int[] expected) {
+        BufferedImage img = TestFrames.load(frame);
+        LatticeReader reader = new LatticeReader(viewport, Tone.estimate(img, viewport));
+        assertEquals(expected.length, reader.detectPlateCount(img), frame + ": plate count");
+        assertArrayEquals(expected, reader.readState(img, expected.length), frame + ": offsets");
+        for (LatticeReader.RowFit row : reader.rows(img, expected.length)) {
+            assertTrue(row.isPlate(), frame + ": every row resolves, not just enough of them");
+        }
+    }
+
+    /**
+     * The corpus's only labelled four-plate lock, and the count that matters most about it: <b>4, not
+     * 6</b>. A four-plate fan is exactly the middle of a six-plate one, so the two extra rows a
+     * six-plate answer needs are the ones at the ends - and on this chest both are occupied by
+     * something that could pass for a plate at a glance. Behind the fan is the room (its whole strip
+     * peaks at luminance 38 where the plates read 255); in front of it is the lock's dark casing, the
+     * piece holding the keyhole and the pick, which sits one depth step ahead of the front plate at
+     * every plate count and reads about 0.28 of the brightest plate. That casing is what
+     * {@code LIT_PLATE} exists to reject, and this is the only frame where it has to do it at a
+     * four-plate fan's front.
+     *
+     * <p>The frame is a live "wrong-model" dump, and the reader was never at fault on it: the run
+     * failed because the offsets below also belong to a different four-plate chest in the catalogue.
+     * See {@code 4p-dark-casing/labels.txt} and {@code LockRecallTest}.
+     */
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("fourPlateFrames")
+    void readsTheFourPlateChestWithoutMistakingItsCasingForAPlate(
+            String frame, Viewport viewport, int[] expected) {
+        BufferedImage img = TestFrames.load(frame);
+        LatticeReader reader = new LatticeReader(viewport, Tone.estimate(img, viewport));
+        assertEquals(4, expected.length, "this group is the four-plate one");
+        assertEquals(4, reader.detectPlateCount(img), frame + ": four plates, never six");
+        assertArrayEquals(expected, reader.readState(img, 4), frame + ": offsets");
+        for (LatticeReader.RowFit row : reader.rows(img, 4)) {
+            assertTrue(row.isPlate(), frame + ": every row resolves");
+        }
+    }
+
     /** The front-plate sweep at every one of the 19 display modes, 1280x720 through 4K. */
     @ParameterizedTest(name = "{0}")
     @MethodSource("sweepFrames")
@@ -133,6 +190,96 @@ class LatticeReaderTest {
 
         assertEquals(6, reader.detectPlateCount(img),
                 "a plate is a row of holes; blacking out its pin leaves the row, so it is still 6");
+    }
+
+    // -- a row that will not resolve costs that row, not the lock ----------------------------------
+
+    /**
+     * A fan may carry <b>one</b> row whose holes did not add up and still be a lock: that row reads
+     * {@link LatticeReader#UNKNOWN}, which the session already knows how to recover, and the plate
+     * count is unharmed because it is carried by the fan's <i>ends</i>, not by its middle.
+     *
+     * <p>This is what a live 7-plate chest cost before: six rows walked 6/6, the back one walked 3/6,
+     * and the player was told there was no lock at all. See {@code 7p-strip-off-plate/labels.txt}.
+     */
+    @Test
+    void oneUnresolvedRowStillLeavesALock() {
+        BufferedImage img = TestFrames.load("6p-gap-shadow/step-0.png");
+        LatticeReader reader = new LatticeReader(Viewport.REFERENCE);
+        assertEquals(6, reader.detectPlateCount(img));
+
+        fillHoleRow(img, 6, 2);
+
+        assertEquals(6, reader.detectPlateCount(img), "one row short of its holes is still six plates");
+        assertArrayEquals(new int[] {2, 1, LatticeReader.UNKNOWN, -2, 3, -3}, reader.readState(img, 6),
+                "the row that would not resolve reads UNKNOWN; the others are untouched");
+    }
+
+    /**
+     * Two, though, and the reader refuses. The tolerance is what keeps a single bad row from costing a
+     * lock; it is not licence to answer from half a fan, and it is the bound that stops it reaching a
+     * wrong-parity fan (whose rows land in the gaps between plates, six of them holeless at once).
+     */
+    @Test
+    void twoUnresolvedRowsAreNotALock() {
+        BufferedImage img = TestFrames.load("6p-gap-shadow/step-0.png");
+        fillHoleRow(img, 6, 2);
+        fillHoleRow(img, 6, 3);
+
+        assertEquals(-1, new LatticeReader(Viewport.REFERENCE).detectPlateCount(img));
+    }
+
+    /**
+     * The beyond-check is <b>not</b> relaxed with the fan itself. It is the test that can only ever
+     * take a lock away - it is how a 4- or 5-plate fan proves it is not the middle of a bigger lock -
+     * so it still demands a whole six-hole row before it fires. Blank the holes of the row one step
+     * past a genuine 5-plate lock and the answer must not change.
+     */
+    @Test
+    void theBeyondCheckStillNeedsAWholeRow() {
+        BufferedImage img = TestFrames.load("plate-count/5-plates.png");
+        LatticeReader reader = new LatticeReader(Viewport.REFERENCE);
+        assertEquals(5, reader.detectPlateCount(img));
+
+        fillHoleRow(img, 5, -1);
+        fillHoleRow(img, 5, 5);
+
+        assertEquals(5, reader.detectPlateCount(img), "still five plates, and still not seven");
+    }
+
+    /**
+     * Paints a plate's hole row over with its own steel: lit metal at the right depth, and not one
+     * hole in it. The band is walked in <b>screen</b> space and tested after un-rotating, so no
+     * destination pixel is missed - mapping a rotated grid forward leaves gaps, and a single stray
+     * dark pixel here would be a hole the reader could find.
+     */
+    private static void fillHoleRow(BufferedImage img, int n, int row) {
+        FanGeometry geo = new FanGeometry(Viewport.REFERENCE);
+        double[] pin = geo.rowPinAtDepth((n - 1) / 2.0 - row);
+        double slope = FanGeometry.slopeAtDepth((n - 1) / 2.0 - row);
+        Rectangle bounds = geo.fanCropScreenBounds(LockModel.MAX_PLATES);
+        List<int[]> band = new ArrayList<>();
+        List<Integer> levels = new ArrayList<>();
+        for (int y = bounds.y; y < bounds.y + bounds.height; y++) {
+            for (int x = bounds.x; x < bounds.x + bounds.width; x++) {
+                if (x < 0 || y < 0 || x >= img.getWidth() || y >= img.getHeight()) {
+                    continue;
+                }
+                double[] r = geo.rotatePoint(x, y, FanGeometry.ROT_DEG);
+                double lineY = pin[1] + (r[0] - pin[0]) * slope;
+                if (Math.abs(r[1] - lineY) <= 20 && Math.abs(r[0] - pin[0]) <= geo.rowMaxDx) {
+                    band.add(new int[] {x, y});
+                    levels.add(Pixels.luminance(img.getRGB(x, y)));
+                }
+            }
+        }
+        // The plate's steel, not its brightest speck: a specular streak must not set the fill.
+        Collections.sort(levels);
+        int steel = levels.get((int) (levels.size() * 0.75));
+        int grey = (steel << 16) | (steel << 8) | steel;
+        for (int[] p : band) {
+            img.setRGB(p[0], p[1], grey);
+        }
     }
 
     /** Paints a square of the frame black. */
@@ -227,6 +374,14 @@ class LatticeReaderTest {
 
     static Stream<Arguments> darkFrames() {
         return FrameCorpus.darkFrames();
+    }
+
+    static Stream<Arguments> stripOffPlateFrames() {
+        return FrameCorpus.stripOffPlateFrames();
+    }
+
+    static Stream<Arguments> fourPlateFrames() {
+        return FrameCorpus.fourPlateFrames();
     }
 
     static Stream<Arguments> sweepFrames() {

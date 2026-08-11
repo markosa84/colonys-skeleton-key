@@ -1,0 +1,60 @@
+# The corpus's first labelled FOUR-plate lock, and the frame that proves the reader was not at fault
+# on 2026-08-11. A four-plate chest (difficulty 2) was read correctly, three times over, and the run
+# still ended with the tool telling the player "the lock I read is not the lock on screen ... a bug in
+# this tool" and asking for this very screenshot. It was not a reader bug at all: the offsets it read,
+# [3, 3, -3, -2], are also the offsets of lock 014 in the bundled catalogue - a DIFFERENT four-plate
+# chest - so the session adopted that chest's connections and the first move of the plan strained.
+# Three F8 presses, several strains and a lockpick went that way. The session-side fix is in
+# LockSession.discardRecall and LockCatalog's ambiguous keys; this frame is here so nobody ever again
+# starts that investigation in the vision layer.
+#
+# Source: captures/wrong-model-20260811-180022-485.png (the third of the three; the full-size original
+# is archived at C:\dev\frames-archive\4p-dark-casing). Nothing about the environment was wrong:
+# borderless 3840x2160, DPI per-monitor-v2, awt scale 1.00, viewport 3840x2160+0+0, gamma probe ink 91
+# / white 255 - on-family, so Tone maps it back to the calibration.
+#
+# WHY IT IS WORTH A FIXTURE ANYWAY. Every other labelled frame in the corpus is 5, 6 or 7 plates -
+# plate-count/4-plates.png gates a bare count and no offsets - yet four is the fan most at risk. The
+# fans of n and n+2 share a lattice, so a four-plate lock sits exactly inside a six-plate one, and
+# losing the two end rows of a six-plate lock is how a real reporter's chest once read as four. This
+# is the same ambiguity seen from the other side: a genuine four-plate lock that must NOT read as six.
+#
+# HOW THE LABELS WERE ESTABLISHED. Not from either reader. Sampling the RAW luminance along each
+# candidate row's deskewed line - no blob detection, no metal estimate, no walk, no Tone - and cutting
+# at the midpoint of that line's own min and max, then keeping the dips of a hole's own width (14-40
+# px; two dips a few px apart are one hole the flat cut split, and are merged first). Every half-step
+# and whole-step depth a plate could occupy, from the back of the fan to the front:
+#
+#   depth  min  max        hole-sized dips, x relative to the pin
+#    +3.0    6   29        (none)                                                   room behind the fan
+#    +2.5    7   38        (none)                                                   room behind the fan
+#    +2.0    7   32        (none)                                                   room behind the fan
+#    +1.5    0  255        -270 -228 -184 -141  -97  -52   step 44   six left   ->  +3   PLATE
+#    +1.0    0  255        (none)                                                   gap between plates
+#    +0.5    0  255        -272 -230 -185 -141  -98  -51   step 44   six left   ->  +3   PLATE  (+206)
+#     0.0    0  255        (none)                                                   gap between plates
+#    -0.5    0  255         +45  +95 +144 +193 +245 +298   step 51   six right  ->  -3   PLATE
+#    -1.0    0  255        (none)                                                   gap between plates
+#    -1.5    0  255         -49  +46  +95 +144 +195 +247   step 50   one left   ->  -2   PLATE
+#    -2.0    0  252        (none)                                                   the dark casing
+#    -2.5    0  201        (none)                                                   the dark casing
+#    -3.0    0  159        +194 +242                                                 the dark casing
+#
+# Four rows of six holes, each on one spacing, and they sit on the HALF steps - which is what an
+# even-plate lock does. Read off as offset = (holes left of the pin) - 3, they give the state below.
+# The row at -1.5 shows the pin's own slot as the one double gap in the run (95 where its neighbours
+# are 49-52), which is the same fact from the other direction.
+#
+# Two dips are off the lattice and are not holes, exactly as in 7p-strip-off-plate: the +0.5 row's
+# +206 sits 4.7 spacings from the pin on a plate whose body ends to the LEFT of it, and the -3.0 pair
+# is a texture of the casing. Neither is quoted as a hole; both are why this census is read as a
+# lattice rather than counted as a bare number of dips.
+#
+# WHAT IT PINS. detectPlateCount must answer 4, not 6. The two extra rows a six-plate fan would need
+# are at +2.5 and -2.5, and the census finds no hole at either: +2.5 is the black room past the back
+# of the fan (its whole strip peaks at 38 against the plates' 255), and -2.5 is the lock's dark front
+# casing, the piece holding the keyhole and the pick, which sits one depth step in front of the front
+# plate whatever the plate count. That casing is the reason LIT_PLATE exists, and this frame is the
+# only one in the corpus where it has to reject a casing at a FOUR-plate fan's front.
+
+step-0.png = [3, 3, -3, -2]

@@ -5,16 +5,17 @@ import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
-import java.util.Comparator;
 import java.util.Deque;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 
 import io.github.markosa84.colonysskeletonkey.solver.Connection;
+import io.github.markosa84.colonysskeletonkey.solver.ConnectionPrior;
 import io.github.markosa84.colonysskeletonkey.solver.Cost;
 import io.github.markosa84.colonysskeletonkey.solver.LockModel;
 import io.github.markosa84.colonysskeletonkey.solver.LockSolver;
@@ -43,6 +44,20 @@ import io.github.markosa84.colonysskeletonkey.solver.Move;
  * the track. That is a condition you can check from a screenshot, and it is what makes strain-free
  * probing possible.
  *
+ * <h2>Locks already opened</h2>
+ * None of that is needed for a chest this tool has met before. The offsets a lock shows at F8 nearly
+ * always identify it - measured across 186 real chests, with one collision - so {@link KnownLocks}
+ * is consulted first and, on a hit, the whole model is adopted and the run goes straight to solving.
+ * It is a hypothesis, not an assumption: it is taken up only if it opens the lock from where the lock
+ * actually is, and every move below still verifies it. See {@link #adopt}.
+ *
+ * <p><b>Nearly</b>, because the key is a measurement rather than a theorem, and two chests do share a
+ * starting configuration now and then - a four-plate lock has only 7^4 of them, and the ends of the
+ * track are twice as likely as anywhere else. So the run also watches for the one contradiction the
+ * skill mechanic cannot produce, and when it comes it throws the <i>whole</i> memory away rather than
+ * the row it was caught on. See {@link #discardRecall}, which is the fix for a real chest the tool
+ * blamed its own reader for.
+ *
  * <h2>Picks first, time second</h2>
  * Each move is chosen cheapest-risk-first:
  * <ol>
@@ -50,8 +65,10 @@ import io.github.markosa84.colonysskeletonkey.solver.Move;
  *   <li><b>Planned</b> - breadth-first search for moves of <i>already-probed</i> plates that clear the
  *       ends for some unprobed plate. Their rows are known, so {@link LockSolver#applyMove} proves each
  *       move legal before a key is pressed. Costs time, never a pick.</li>
- *   <li><b>Gamble</b> - when neither exists. Fewest plates at ends first, sliding toward centre
- *       so plates walk off the ends and the next move is safer.</li>
+ *   <li><b>Gamble</b> - when neither exists, and then the cheapest gamble on the board:
+ *       {@link io.github.markosa84.colonysskeletonkey.solver.ConnectionPrior} costs every unprobed
+ *       plate against both directions from what 186 real locks say about how a lock is wired. Toward
+ *       centre survives as the tie-break, since it still walks plates off the ends.</li>
  *   <li><b>Reposition then gamble</b> ({@link #escalate}) - the last resort, and what keeps a solvable
  *       lock from reporting "stuck". Probing one interior plate can drag another to an end, where its
  *       only informative direction goes off-track and discovery dead-ends. So search the moves of
@@ -63,6 +80,13 @@ import io.github.markosa84.colonysskeletonkey.solver.Move;
  * blocking it ({@link #isRefused}). <b>That memory survives a broken pick</b>, which is what stops the
  * reset from recreating the very gamble that just failed - the old failure mode where a hard lock ate
  * every pick in the player's inventory.
+ *
+ * <p>And a strain is made to pay for itself. It proves the plate dragged <i>something</i> off an end,
+ * so the culprit is among the plates parked out there, dragged the one way that would push it off;
+ * when only one plate qualifies - a third of real strains - that connection is settled outright
+ * ({@link #deduceFrom}). What it buys is {@link #certainlyStrains}: a move ruled out from <b>any</b>
+ * configuration, where the refusal memory only recognises the same slide from a configuration where
+ * every plate that was at an end still is.
  *
  * <p><b>A strain the read says is impossible is a misread, not a refusal.</b> A slide can only strain by
  * dragging a plate off an end, so a strain with nothing at either end contradicts the geometry that made
@@ -147,10 +171,48 @@ public final class LockSession {
     private final CursorKeys keys;
     private final MoveExecutor mover;
     private final SessionReporter reporter;
+    /** Locks opened before, consulted instead of probing when this one is among them. */
+    private final KnownLocks known;
 
     private int n;
     /** {@code conn[p]} is what moving p drags, or null while p is unprobed. */
     private Connection[][] conn;
+    /**
+     * {@code fromRecall[p]} while {@code conn[p]} came out of {@link KnownLocks} rather than off the
+     * screen. Such a row is used exactly like a probed one - the plan it feeds is verified move by
+     * move - but it is the first thing recovery suspects, and the first thing an observation replaces.
+     */
+    private boolean[] fromRecall;
+    /**
+     * True once a remembered model has been adopted, so the search for one stops - and it stays true
+     * after {@link #discardRecall} throws that model away, which is what spends recall for the rest
+     * of the run. The alternative, letting {@link #recogniseFromProbedRows} look again, sounds
+     * strictly better and is not: it asks a weaker question (does a model agree with the rows probed
+     * so far?), and the chest that just fooled us can answer yes on every row it was not caught on.
+     * Re-adopting it would cost another contradiction to shake off, and each of those counts as
+     * progress, so the loop guard would not catch the cycle. Probing always works; this run probes.
+     */
+    private boolean recallAdopted;
+    /**
+     * True once anything was ever recalled this run, even if it has since been discarded. It is what
+     * keeps the {@code moves == 0} give-up honest: that message blames the <b>reader</b>, and it may
+     * only do so when every row it drove came off the screen.
+     */
+    private boolean everRecalled;
+    /**
+     * Connections proved by a strain rather than seen: a <b>partial</b> row, never a complete one.
+     * A slide can only strain by dragging a plate off an end, so when exactly one plate sits where
+     * this slide could have pushed it off, that plate and the way it is dragged are settled - no
+     * probability involved. Measured over the corpus, a third of real strains are that clear-cut.
+     *
+     * <p>Kept apart from {@link #conn} on purpose. {@code conn[p] != null} means "this row is
+     * complete", which is what licenses {@link LockSolver#applyMove} to call a move legal. A partial
+     * row can only ever prove the opposite - that a move <i>will</i> strain - so it is used for that,
+     * for weighing a gamble, and for nothing else.
+     */
+    private Connection[][] deduced;
+    /** Deductions made this run; a progress signal for the loop guard. */
+    private int deductions;
     /** Slide attempts already known to strain. Never cleared within a run - see {@link #isRefused}. */
     private final List<Refusal> refused = new ArrayList<>();
     /** Moves whose outcome hid a row, keyed by the exact configuration they were tried from. */
@@ -249,14 +311,25 @@ public final class LockSession {
     private boolean solved;
 
     public LockSession(LockView view, CursorKeys keys, MoveExecutor mover) {
-        this(view, keys, mover, new SessionReporter());
+        this(view, keys, mover, KnownLocks.NONE);
+    }
+
+    /** Consulting what has already been opened, which is how a known lock skips discovery entirely. */
+    public LockSession(LockView view, CursorKeys keys, MoveExecutor mover, KnownLocks known) {
+        this(view, keys, mover, known, new SessionReporter());
     }
 
     /** With an injected reporter, so a test can watch the console story without scraping stdout. */
     LockSession(LockView view, CursorKeys keys, MoveExecutor mover, SessionReporter reporter) {
+        this(view, keys, mover, KnownLocks.NONE, reporter);
+    }
+
+    LockSession(LockView view, CursorKeys keys, MoveExecutor mover, KnownLocks known,
+            SessionReporter reporter) {
         this.view = view;
         this.keys = keys;
         this.mover = mover;
+        this.known = known;
         this.reporter = reporter;
     }
 
@@ -278,7 +351,10 @@ public final class LockSession {
         }
         trace("model, as learned:");
         for (int p = 0; p < n; p++) {
-            trace("  plate " + p + " -> " + (conn[p] == null ? "UNPROBED" : SessionReporter.describe(conn[p])));
+            trace("  plate " + p + " -> " + (conn[p] == null
+                    ? "UNPROBED"
+                    : SessionReporter.describe(conn[p])
+                            + (fromRecall[p] ? "   (remembered, not yet re-observed)" : "")));
         }
         trace(String.format(Locale.ROOT,
                 "state %s | strains %d (misread %d, gamble %d) | breaks %d | moves %d",
@@ -308,6 +384,12 @@ public final class LockSession {
         conn = new Connection[n][];
         contested = new boolean[n];
         observationCount = new int[n];
+        fromRecall = new boolean[n];
+        recallAdopted = false;
+        everRecalled = false;
+        deduced = new Connection[n][];
+        Arrays.fill(deduced, new Connection[0]);
+        deductions = 0;
         recoveryTried.clear();
         preRecoveryRow.clear();
         recoveryResets = 0;
@@ -349,6 +431,10 @@ public final class LockSession {
         initialState = cur.clone(); // cur is overwritten as we go; the history wants the F8-time state
         reporter.detected(n, cur);
         trace("detected " + n + " plates at " + Arrays.toString(cur));
+        // The offsets a lock shows at F8 identify it, so this is the whole of discovery on a chest
+        // that has been opened before. Nothing is trusted by adopting it - every move below is still
+        // checked against what the lock actually does.
+        known.recall(n, cur).ifPresent(model -> adopt(model, "I have opened this lock before"));
 
         try {
             loop();
@@ -409,9 +495,21 @@ public final class LockSession {
                 if (moves == 0) {
                     // Every lock the game hands you is openable, so from any configuration at least
                     // one slide is legal. If NOTHING moved - no plate, in either direction - then the
-                    // lock being driven is not the lock on screen: the plate count or the offsets
-                    // were misread, and every strain above was spent proving it. Reported as the bug
-                    // it is, with the frame attached, instead of shrugging at the lock.
+                    // lock being driven is not the lock on screen.
+                    //
+                    // WHICH lock, though, depends on where the model came from, and only one of the
+                    // two answers is a reader bug. A run that recalled a model may simply have been
+                    // handed another chest's: the offsets key the catalogue, and they collide. Saying
+                    // "the plate count or the offsets are wrong" there sends the player hunting a
+                    // vision bug over a frame that read perfectly - which is exactly what happened.
+                    if (everRecalled) {
+                        reporter.falseRecallGiveUp();
+                        view.dumpFrame("false-recall");
+                        return;
+                    }
+                    // Nothing was ever recalled, so every row driving this came off the screen: the
+                    // plate count or the offsets really are wrong, and every strain above was spent
+                    // proving it. Reported as the bug it is, with the frame attached.
                     reporter.wrongModel();
                     view.dumpFrame("wrong-model");
                     return;
@@ -433,8 +531,153 @@ public final class LockSession {
                 view.dumpFrame(misreadStrains > 0 ? "misread" : "stuck");
                 return;
             }
+            int probedBefore = probedCount();
             step(action);
+            if (probedCount() > probedBefore) {
+                recogniseFromProbedRows();
+            }
         }
+    }
+
+    // --- locks opened before ---
+
+    /**
+     * Takes a remembered model as the starting point instead of probing for one, but only if it opens
+     * the lock from where the lock actually is - a model that cannot is stale, or belongs to a
+     * different chest, and is dropped without a key being pressed.
+     *
+     * <p>Rows this run has observed for itself are never overwritten: an observation outranks a
+     * memory. What is adopted is only the gap, and each adopted row is flagged {@link #fromRecall} so
+     * a later observation replaces it and {@link #suspectPlate} suspects it first.
+     *
+     * <p>This is safe rather than merely convenient <b>as far as the character's skill goes</b>, and
+     * the reason is the game's own skill mechanic. Trained removes one plate connection and Master
+     * removes another, so a lock is a <b>subset</b> of its untrained self, and
+     * {@link LockSolver#applyMove} can only fail by pushing an affected plate off its track - a subset
+     * affects fewer plates, by the same deltas. A remembered model that is too <i>full</i> therefore
+     * mispredicts where the plates land, and the verification catches that in one move; it cannot
+     * strain the pick.
+     *
+     * <p><b>Identity is the other half, and it is not free.</b> That argument says a memory of
+     * <i>this chest</i> is safe; it says nothing about whether this is that chest. The key is
+     * {@code (plate count, offsets)} - one collision in 186 real locks, and a property
+     * of the game rather than a theorem, and with the smallest key space (four plates, 7^4 states
+     * skewed hard toward the ends of the track) it does collide. A memory of a <i>different</i> chest
+     * is neither superset nor subset, and it can strain. So the run watches for exactly the
+     * contradiction the skill mechanic cannot produce, and throws the whole memory away when it comes
+     * - see {@link #discardRecall}.
+     */
+    private boolean adopt(Connection[][] remembered, String why) {
+        if (recallAdopted || remembered.length != n || !LockModel.isComplete(cur)) {
+            return false;
+        }
+        for (Connection[] row : remembered) {
+            if (row == null) {
+                return false;
+            }
+        }
+        LockModel candidate = new LockModel(n, cur, remembered, LockModel.MAX_OFFSET);
+        if (LockSolver.solve(candidate, cur, keys.cursor(), Cost.WALLCLOCK) == null) {
+            trace("recall: a remembered model does not open the lock from " + Arrays.toString(cur)
+                    + "; ignoring it and probing as usual");
+            return false;
+        }
+        // Both callers only reach here with at least one row still unprobed, so this always adopts
+        // something; rows already probed for real are skipped, because an observation outranks a memory.
+        int adopted = 0;
+        for (int p = 0; p < n; p++) {
+            if (conn[p] != null) {
+                continue;
+            }
+            conn[p] = remembered[p].clone();
+            fromRecall[p] = true;
+            adopted++;
+        }
+        plan = null;
+        recallAdopted = true;
+        everRecalled = true;
+        reporter.recognised(why, adopted);
+        trace(why + ": adopted " + adopted + " remembered row(s) without probing");
+        traceModel();
+        return true;
+    }
+
+    /**
+     * Throws away a remembered model the lock has disproved, along with every row still resting on
+     * it, and lets discovery start over from what the lock has actually shown.
+     *
+     * <p>Called on exactly the contradictions the skill mechanic cannot account for, because those
+     * are the ones that prove the memory is of <b>another chest</b> rather than of this one at a
+     * higher level: a strain on a slide the memory called legal (a superset cannot make a legal move
+     * strain), and an observed row that <i>adds</i> a connection the memory lacks (training only ever
+     * removes one). Either way the offsets collided.
+     *
+     * <p>Dropping the <b>whole</b> memory rather than the one row it was caught on is the point. The
+     * rows left behind are fiction about a different lock, and {@link #planUnblock} and
+     * {@link #repositionForFreshGamble} search over exactly the plates whose rows are "known" - so a
+     * single surviving lie can leave both searches unable to find any legal move at all, and the run
+     * reports a lock that will not budge on a lock it read perfectly. That is the live failure this
+     * exists for.
+     *
+     * <p>What is kept: every row this run observed for itself, every refusal, every deduction. Those
+     * are facts about the lock on screen, and nothing here casts doubt on them.
+     */
+    private void discardRecall() {
+        int dropped = 0;
+        for (int p = 0; p < n; p++) {
+            if (fromRecall[p]) {
+                conn[p] = null;
+                fromRecall[p] = false;
+                dropped++;
+            }
+        }
+        if (dropped == 0) {
+            // The row that gave the memory away was the last one still resting on it, so there is
+            // nothing left to drop and nothing to say. recallAdopted stays true either way.
+            return;
+        }
+        // recallAdopted stays true: this run is done with the catalogue, and probes. See the field.
+        plan = null;
+        corrections++; // a fact changed - re-plan, and reset the loop guard
+        reporter.recallWrongChest(dropped);
+        trace("recall: the memory is of a different chest sharing these offsets; dropped " + dropped
+                + " remembered row(s) and probing from here");
+    }
+
+    /**
+     * The way back when F8 was pressed on a lock that is no longer pristine - a retry after a run
+     * that stopped early. The offsets key nothing then, but a row this run has probed for itself is
+     * a fingerprint of its own: measured over the corpus, one row cuts a six-plate lock from 58
+     * remembered locks to about four, and names it outright 39% of the time. Adopted only when
+     * exactly one candidate is left, so an ambiguous match keeps probing.
+     */
+    private void recogniseFromProbedRows() {
+        if (recallAdopted || allProbed()) {
+            return;
+        }
+        Map<Integer, Connection[]> observed = new HashMap<>();
+        for (int p = 0; p < n; p++) {
+            if (conn[p] != null && !fromRecall[p]) {
+                observed.put(p, conn[p]);
+            }
+        }
+        if (observed.isEmpty()) {
+            return;
+        }
+        List<Connection[][]> fits = known.matching(n, observed);
+        if (fits.size() == 1) {
+            adopt(fits.get(0), "one lock I have opened before matches every row probed so far");
+        }
+    }
+
+    private int probedCount() {
+        int probed = 0;
+        for (Connection[] row : conn) {
+            if (row != null) {
+                probed++;
+            }
+        }
+        return probed;
     }
 
     /**
@@ -467,7 +710,8 @@ public final class LockSession {
             if (conn[p] != null) probed |= 1L << p;
         }
         return (((long) strains) << 44) ^ (((long) observedBreaks) << 34)
-                ^ (((long) occluded.size()) << 24) ^ (((long) corrections) << 16) ^ (probed << 8);
+                ^ (((long) occluded.size()) << 24) ^ (((long) corrections) << 16)
+                ^ (((long) deductions) << 12) ^ (probed << 8);
     }
 
     /** Plays one move and folds what happened back into what we know. */
@@ -521,24 +765,43 @@ public final class LockSession {
             }
         } else {
             refused.add(new Refusal(p, dir, plusEnds, minusEnds));
+            deduceFrom(p, dir, before);
         }
         cur = obs.state();
         // The game may have moved the selection - it re-homes it whenever a pick breaks, and a break
         // is invisible above skill level 0. Saturating S is right either way, at ~10ms a press.
         keys.endCursor(n);
 
+        // The model's correction comes FIRST, before the break is handled. A pick breaking is not a
+        // reason to go on believing a row the lock has just disproved, and this used to return above:
+        // the row survived, the next pass re-solved to the same plan, and the identical move was
+        // replayed for a second strain. (Seen live: two strains and a pick on one refused slide.)
+        boolean rowDropped = conn[p] != null;
+        if (rowDropped) {
+            // The model swore this was legal. It is the model that is wrong, so re-probe p.
+            reporter.refusedLegalMove(p);
+            boolean remembered = fromRecall[p];
+            conn[p] = null;
+            fromRecall[p] = false;
+            corrections++;
+            if (remembered && !contradictory) {
+                // A memory of THIS chest could only be a superset of the truth, and a superset cannot
+                // make a legal move strain. So this is a different chest showing the same offsets,
+                // and everything else still merely remembered is fiction about it.
+                discardRecall();
+            }
+        }
+
         if (obs.pickBroke()) {
             recordBreak(obs.outcome() == MoveExecutor.Outcome.RESET);
             reporter.pickBroke(strainsPerPick, observedBreaks,
-                    obs.outcome() == MoveExecutor.Outcome.RESET, breakResetThePuzzle, cur);
+                    obs.outcome() == MoveExecutor.Outcome.RESET, breakResetThePuzzle, cur, rowDropped);
             return;
         }
-        if (conn[p] != null) {
-            // The model swore this was legal. It is the model that is wrong, so re-probe p.
-            reporter.refusedLegalMove(p);
-            conn[p] = null;
-            corrections++;
-        } else if (contradictory) {
+        if (rowDropped) {
+            return; // already reported, above
+        }
+        if (contradictory) {
             // Nothing was at an end, so don't retry this exact slide from this exact configuration;
             // once some plate moves, the misread may resolve and it becomes worth another look.
             occluded.add(new Occlusion(p, dir, LockSolver.encode(model(), before)));
@@ -546,6 +809,57 @@ public final class LockSession {
         } else {
             reporter.willNotSlideYet(p, dir, strains);
         }
+    }
+
+    /**
+     * What a strain proves. The slide was rejected, and the only way a slide can be rejected is by
+     * dragging some plate off the end of its track - so the culprit is among the plates parked at an
+     * end, and each of those could only be the culprit if dragged one particular way (a plate at the
+     * left end goes off only by moving further left). When exactly one plate qualifies, that is not a
+     * suspicion: {@code p} drags it, that way, and the run keeps the fact.
+     *
+     * <p>A third of the strains in the corpus are that clear-cut, and half the rest narrow to two
+     * candidates - which is left alone here, because a disjunction is not a connection. The strain was
+     * paid for either way; this is only refusing to throw the receipt away.
+     */
+    private void deduceFrom(int p, int dir, int[] state) {
+        Connection only = null;
+        for (int q = 0; q < n; q++) {
+            if (q == p || Math.abs(state[q]) != LockModel.MAX_OFFSET) {
+                continue;
+            }
+            if (only != null) {
+                return; // more than one plate could have been the one pushed off; nothing is settled
+            }
+            boolean atLeftEnd = state[q] == LockModel.MAX_OFFSET;
+            only = new Connection(q, (atLeftEnd == (dir > 0))
+                    ? Connection.Type.NORMAL : Connection.Type.INVERTED);
+        }
+        if (only == null || List.of(deduced[p]).contains(only)) {
+            return;
+        }
+        List<Connection> row = new ArrayList<>(List.of(deduced[p]));
+        row.add(only);
+        deduced[p] = row.toArray(new Connection[0]);
+        deductions++;
+        reporter.deducedFromStrain(p, only);
+        trace("deduced from the strain: plate " + p + " drags "
+                + SessionReporter.describe(new Connection[] {only}));
+    }
+
+    /**
+     * True when something already deduced about {@code p} guarantees this slide strains. Stronger
+     * than the refusal memory, which only recognises the same slide from a configuration where every
+     * plate that was at an end still is: a deduced connection rules the move out from <b>any</b>
+     * configuration, and in the direction never tried as well.
+     */
+    private boolean certainlyStrains(int[] state, int p, int dir) {
+        for (Connection c : deduced[p]) {
+            if (Math.abs(state[c.target()] + dir * c.type().sign()) > LockModel.MAX_OFFSET) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
@@ -571,13 +885,29 @@ public final class LockSession {
         // What this reading disagrees with: a row already in hand, or - if the plate was just cleared for
         // a recovery re-probe - the row that recovery threw away. Either way a change is real progress.
         Connection[] previous = first ? preRecoveryRow.remove(p) : conn[p];
+        boolean wasRemembered = fromRecall[p];
+        boolean memoryGainedALink = false;
         if (previous != null && !Arrays.equals(previous, learned)) {
+            if (wasRemembered) {
+                // Not a misread: most often the character has trained since this lock was recorded,
+                // which removes a plate connection. Say which, then take what the lock just did.
+                reporter.recallCorrected(p, previous, learned);
+                // But training only ever REMOVES one. A row that comes back with a connection the
+                // memory does not have cannot be this chest at any level, so the memory is of another
+                // chest that happens to show the same offsets - see discardRecall.
+                memoryGainedALink = !Connection.rowContains(previous, learned);
+            }
             plan = null; // the model the plan was built on was wrong about this plate
             corrections++; // a fact changed - progress, for the loop guard
             contested[p] = true; // this plate read two different ways: a prime misread suspect
             recoveryTried.clear(); // the model just improved; let recovery reconsider every plate
         }
         conn[p] = learned;
+        fromRecall[p] = false; // seen for real now; no longer something merely remembered
+        if (memoryGainedALink) {
+            discardRecall(); // p's row is already observed, so this only clears the ones still guessed
+        }
+        deduced[p] = new Connection[0]; // the whole row is in hand; the partial one has nothing to add
         observationCount[p]++;
         if (first) {
             inEscalation = false; // a plate newly probed is real progress; leave the escalation regime
@@ -745,6 +1075,11 @@ public final class LockSession {
         if (allProbed()) {
             inEscalation = false;
             tier = "solving";
+            // No refusal check here, deliberately - see "The solving tier needs no refusal gate" in
+            // CLAUDE.md's dead ends. Every discovery tier screens its move through worthTrying, and
+            // it looks like an oversight that this one does not; it is not. A refusal is only ever
+            // recorded in step(), which clears the mover's row in the same breath, so the moment a
+            // slide is refused its plate is unprobed and there is no plan to propose it again.
             return solvingMove();
         }
         Move free = freeMove();
@@ -848,21 +1183,45 @@ public final class LockSession {
     }
 
     /**
-     * Press a key and accept the risk. Plates with the fewest others parked at ends go first, because
-     * those are the likeliest to move; and each slides toward centre, which walks it off an end and
-     * makes every later move safer.
+     * Press a key and accept the risk - but the smallest risk available, and as a number rather than
+     * a proxy for one. {@link ConnectionPrior} costs out every unprobed plate against every direction
+     * from the offsets on screen, using what 124 real locks say about how many connections a lock has
+     * and which way they run.
+     *
+     * <p>It replaces "fewest other plates at an end, then toward centre", which could not tell a 34%
+     * gamble from a 40% one - and those are the real odds of the same slide taken the two ways round
+     * on a fresh six-plate lock, because INVERTED is the commoner connection. Toward centre survives
+     * as the tie-break: it still walks a plate off an end and makes every later move safer.
      */
     private Move gamble() {
-        List<Integer> order = new ArrayList<>();
+        ConnectionPrior prior = ConnectionPrior.from(n, conn);
+        Move best = null;
+        double bestRisk = Double.MAX_VALUE;
+        boolean bestTowardCentre = false;
         for (int p = 0; p < n; p++) {
-            if (conn[p] == null) order.add(p);
+            if (conn[p] != null) {
+                continue;
+            }
+            int toward = cur[p] > 0 ? -1 : +1;
+            for (int dir : new int[] {toward, -toward}) {
+                if (!worthTrying(cur, p, dir)) {
+                    continue;
+                }
+                double risk = prior.strainRisk(cur, p, dir, deduced[p]);
+                boolean towardCentre = dir == toward;
+                if (best == null || risk < bestRisk - 1e-9
+                        || (risk < bestRisk + 1e-9 && towardCentre && !bestTowardCentre)) {
+                    best = new Move(p, dir);
+                    bestRisk = risk;
+                    bestTowardCentre = towardCentre;
+                }
+            }
         }
-        order.sort(Comparator.comparingInt(p -> othersAtEnds(cur, p)));
-        for (int p : order) {
-            int dir = pickDirection(p);
-            if (dir != 0) return new Move(p, dir);
+        if (best != null) {
+            trace(String.format(Locale.ROOT, "gamble: plate %d %s, %.0f%% chance of straining",
+                    best.plate(), best.dir() > 0 ? "left" : "right", bestRisk * 100));
         }
-        return null;
+        return best;
     }
 
     /** Toward centre if that is still worth trying, else away from it, else 0, from {@code cur}. */
@@ -879,12 +1238,21 @@ public final class LockSession {
     private int pickDirectionAt(int[] state, int p) {
         int toward = state[p] > 0 ? -1 : +1;
         for (int dir : new int[] {toward, -toward}) {
-            if (Math.abs(state[p] + dir) > LockModel.MAX_OFFSET) continue; // p itself would fall off
-            if (isRefused(state, p, dir)) continue;
-            if (isOccludedAt(state, p, dir)) continue;
-            return dir;
+            if (worthTrying(state, p, dir)) return dir;
         }
         return 0;
+    }
+
+    /**
+     * Whether this slide is still worth a key: it keeps {@code p} on its own track, it is not one the
+     * refusal memory has ruled out, it is not known to hide a row from here, and nothing already
+     * deduced about {@code p} guarantees it strains.
+     */
+    private boolean worthTrying(int[] state, int p, int dir) {
+        return Math.abs(state[p] + dir) <= LockModel.MAX_OFFSET
+                && !isRefused(state, p, dir)
+                && !isOccludedAt(state, p, dir)
+                && !certainlyStrains(state, p, dir);
     }
 
     /** True if this exact move, from this exact configuration, is known to hide a row. */
@@ -1132,6 +1500,22 @@ public final class LockSession {
     /** Whether this run opened the lock. False on any give-up, and before {@link #run()} concludes. */
     public boolean solved() {
         return solved;
+    }
+
+    /**
+     * The character's lockpicking level, if this run happened to reveal it - which only a broken pick
+     * does, so a clean run reveals nothing and says so. Observed, never configured: the player can
+     * train between one lock and the next.
+     *
+     * <p>It is worth writing into the solve history because the level changes the <b>lock</b>, not
+     * only the pick: Trained removes one plate connection and Master removes another. A model recorded
+     * untrained is the maximal one, and that is the only kind recall can lean on freely.
+     */
+    public Optional<Skill> observedSkill() {
+        if (breakResetThePuzzle) {
+            return Optional.of(Skill.UNTRAINED); // only an untrained break sends the plates home
+        }
+        return Skill.fromStrainsPerPick(strainsPerPick);
     }
 
     /** The offsets read the instant F8 was pressed, or null if no lock was ever detected. */

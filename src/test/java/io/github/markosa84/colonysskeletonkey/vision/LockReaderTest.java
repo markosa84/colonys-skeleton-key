@@ -77,6 +77,22 @@ class LockReaderTest {
         assertArrayEquals(expected, scaled.readState(img, expected.length), frame + ": offsets");
     }
 
+    /**
+     * The corpus's only labelled four-plate lock. The reference reader counts <b>pins</b>, so a
+     * four-plate fan is the case it is weakest on - the same pins are the middle of a six-plate lock,
+     * and only {@code plateBeyond} keeps the two apart. Here it has to hold against the lock's dark
+     * front casing sitting exactly where a six-plate fan's front row would be. The frame is on-family
+     * (gamma probe ink 91), so it goes through the {@code Tone} like every other calibrated frame.
+     */
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("fourPlateFrames")
+    void readsTheFourPlateChestToo(String frame, Viewport viewport, int[] expected) {
+        BufferedImage img = TestFrames.load(frame);
+        LockReader toned = new LockReader(viewport, Tone.estimate(img, viewport));
+        assertEquals(4, toned.detectPlateCount(img), frame + ": four plates, never six");
+        assertArrayEquals(expected, toned.readState(img, 4), frame + ": offsets");
+    }
+
     // -- a smaller fan is not a smaller lock -------------------------------------------------------
 
     /**
@@ -272,5 +288,9 @@ class LockReaderTest {
 
     static Stream<Arguments> sweepFrames() {
         return FrameCorpus.sweepFrames();
+    }
+
+    static Stream<Arguments> fourPlateFrames() {
+        return FrameCorpus.fourPlateFrames();
     }
 }
