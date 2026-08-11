@@ -6,7 +6,6 @@
 ### Features
 
 * remember every lock opened and skip straight to solving it again ([838dba4](https://github.com/markosa84/colonys-skeleton-key/commit/838dba47d5bf6bc8e3c733d961b578aca89cc6fa))
-* remember every lock opened and skip straight to solving it again ([838dba4](https://github.com/markosa84/colonys-skeleton-key/commit/838dba47d5bf6bc8e3c733d961b578aca89cc6fa))
 
 ## [1.5.0](https://github.com/markosa84/colonys-skeleton-key/compare/v1.4.0...v1.5.0) (2026-07-20)
 
