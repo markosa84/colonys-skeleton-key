@@ -1,6 +1,6 @@
 # Labelled calibration frames
 
-These 227 PNGs are the test fixtures the vision layer is calibrated and gated against — every pixel
+These 228 PNGs are the test fixtures the vision layer is calibrated and gated against — every pixel
 constant in `LockReader` is fitted to them, and both readers' tests replay them on every build. (The
 seven `hdr/` frames are the exception: only the tone-free `LatticeReader` reads them, because
 `LockReader` refuses HDR — correctly.) They are captures of the Gothic 1 Remake lockpicking minigame
@@ -20,6 +20,7 @@ it too, or the corpus starts growing by ~12 MB a shot.
 | `plate-count/` | the 4/5/6-plate fans |
 | `5p-*`, `6p-*`, `7p-*` | slide sequences at 4K: each is a chain of single steps, so a reader wrong on one frame breaks the whole sequence's arithmetic |
 | `6p-gap-shadow/` | a live misread: an arch-gap shadow the old hole walk mistook for a seventh hole |
+| `7p-strip-off-plate/` | a live "no lock detected" over a frame that looks fine: the back plate had slid to +3, so a quarter of the strip its steel was measured in lay on black room past the end of the plate, the median came back 162 where the steel reads 210–255, and three of that row's six holes traced too thin to survive. It pins measuring a plate's steel as the strip's **bright population**, the re-referenced `HOLE_DARK`, and that one unresolved row costs the row, not the lock |
 | `<width>x<height>/front-plate-sweep/` | one 5-plate lock replayed at all 19 display modes at/above the 1280×720 floor, 1280x720 to 4K — this is what validates the `Viewport` scaling against real renders |
 | `gamma/` | one 7-plate lock replayed across the game's **gamma slider**, 1.2 to 3.2 — what `vision/Tone` is measured against and gated by. Raw, the two ends break the reader in opposite ways |
 | `2560x1440/gamma-1.2-sweep/` | the dark end at the resolution a user actually reported broken: gamma and scale are independent faults |
@@ -29,4 +30,8 @@ it too, or the corpus starts growing by ~12 MB a shot.
 `3840x2160/front-plate-sweep/labels.txt`, `gamma/labels.txt` and `hdr/labels.txt` record how those
 labels were established — all rest on the same argument, that game state depends on the **keys sent**,
 not on the pixels that come back, so a known protocol labels a frame without a reader you can yet trust.
+A one-off failure dump has no protocol behind it, so it is labelled from the pixels *without* the
+machinery under repair: `7p-strip-off-plate/labels.txt` records a raw-luminance census of the hole
+lattice (no blob detection, no metal estimate, no walk), the way `6p-gap-shadow` was settled by the
+user marking every hole.
 `docs/INTERNALS.md` explains what the reader does with all of it.

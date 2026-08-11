@@ -64,10 +64,44 @@
   verify every move against `applyMove` before pressing and against the observed state afterwards.
 
 - **The session is fully drivable by fakes.** `LockSession` depends only on the seam interfaces it
-  owns (`LockView`, `MoveExecutor`, `CursorKeys`) — see `FakeGame` in the test tree, which simulates
-  a lock with hidden connections and the game's real strain/break/reset rules (knobs: `lieAtPlay`,
-  `hiddenPlate`/`hideWhen`, `unreadableAtPlay`, `unreadableOnceOpen`). Prefer extending that over
-  building a live harness.
+  owns (`LockView`, `MoveExecutor`, `CursorKeys`, `KnownLocks`) — see `FakeGame` in the test tree,
+  which simulates a lock with hidden connections and the game's real strain/break/reset rules (knobs:
+  `lieAtPlay`, `hiddenPlate`/`hideWhen`, `unreadableAtPlay`, `unreadableOnceOpen`). Prefer extending
+  that over building a live harness. `KnownLocks.NONE` is the default, so a test that does not care
+  about recall never sees it.
+
+- **`LockSession` has its own corpus gate now, and any change to discovery must be measured on it.**
+  `gradlew corpus` replays all 186 real locks from the bundled `known-locks.txt` at all three
+  lockpicking levels through the real session and prints strains/plays/breaks; `gradlew test` runs a
+  fixed sample. It exists because the search is chaotic — a change that "obviously" reduces strains
+  moved the corpus by 1.4%, and made 5-plate locks slightly *worse*. Record before and after.
+
+- **A remembered model is a hypothesis, and one particular kind of wrong is safe.** `KnownLocks`
+  hands `LockSession` a whole connection table for a lock it has opened before; the session takes it
+  only if it opens the lock from where the lock is, and verifies every move regardless. What makes it
+  cheap rather than merely safe is that skill *removes* connections (Trained one, Master another), so
+  the untrained catalogue is a **superset** of any lock it describes, and a move legal under a superset
+  is legal under the truth. A superset mispredicts; it cannot strain. **If you ever write a model into
+  the catalogue with a row you did not observe, you break that** — an assumed-empty row is a *subset*,
+  which is the unsafe direction. That is why `LockCatalog` drops an entry with a `?` row outright.
+
+- **…and the other kind of wrong is a different chest, which is not safe and must take the whole
+  memory with it.** The superset argument is about the character's *skill*; it says nothing about
+  whether this is that chest. The key is `(plate count, offsets)`, 7⁴ states at four plates with the
+  ends of the track twice as likely as anywhere else, so two chests do collide — measured at ~1.5% per
+  new four-plate lock against the entries recorded so far. `Connection.rowContains` is the whole
+  discriminator: training only ever removes a connection, so a strain on a slide the memory called
+  legal, or an observed row with a link the memory lacks, cannot be this chest at any level.
+  `LockSession.discardRecall` then clears **every** row still merely remembered — clearing only the one
+  it was caught on leaves `planUnblock` and `repositionForFreshGamble` planning over another lock, and
+  they find no legal move at all. `LockCatalog` marks such a key ambiguous and stops recalling it;
+  `matching()` still separates the two chests off one probed row.
+
+- **Deduced connections (`deduced[]`) are not learned connections (`conn[]`).** A strain proves the
+  plate drags one of the plates at an end, and when only one qualifies that connection is settled. But
+  it is a *partial* row: `conn[p] != null` means "complete", which is what lets `applyMove` call a move
+  legal, and a partial row can only ever prove a move **illegal** (`certainlyStrains`). Don't merge
+  them.
 
 - **So is everything else — the `Robot` is behind a seam.** `java.awt.Robot` cannot be constructed
   *or subclassed* in a headless JVM, which is why `GameScreen` takes a `ScreenGrabber` and

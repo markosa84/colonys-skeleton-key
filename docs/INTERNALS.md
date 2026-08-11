@@ -285,7 +285,8 @@ is reported as such, not rounded into a guess.)
 A screenshot is only the first third of it. One frame tells you *where the plates currently sit*,
 but not how they are wired to each other — and you cannot solve the puzzle without knowing that. So
 the tool reads the lock off the screen, physically experiments on it to learn the wiring, and then
-searches for the cheapest solution and types it in.
+searches for the cheapest solution and types it in — unless it recognises the lock, in which case it
+skips the middle step entirely.
 
 ### 1. Reading one frame into numbers
 
@@ -368,13 +369,59 @@ cheapest-risk-first:
 2. **Planned** — breadth-first search over moves of *already-probed* plates for a sequence that clears
    the ends for some unprobed plate. Their connections are known, so every move is proven legal before
    a key is pressed. This costs time, never a pick — which is exactly the trade we want.
-3. **Gamble** — only when neither of the above exists. Fewest plates at ends first, sliding toward
-   centre so plates walk off the ends and the next move is safer.
+3. **Gamble** — only when neither of the above exists, and then the *cheapest* gamble available. Every
+   unprobed plate is costed against both directions from what is on screen, using what 186 real locks
+   say about how a lock is wired (below). Only a plate already parked at an end can be pushed off one,
+   and each of those is fatal in exactly one of the two ways it could be dragged — so the same slide is
+   not equally risky both ways round. On a fresh six-plate lock with three plates parked at one end,
+   sliding left risks 34% and sliding right 40%.
 
 A gamble that strains is remembered and never retried while the plate that blocked it could still be
 blocking it. **That memory survives a broken pick.** Without it, an untrained player's reset would
 restore the exact configuration the gamble just failed in and the tool would try it again, and again —
 the old failure mode where a hard lock ate every pick you owned.
+
+And a strain is not wasted. A slide is refused for one reason only — it would push some plate off the
+end of its track — so the culprit is among the plates already out there, dragged the one way that
+would push it off. When only one plate qualifies there is nothing left to guess: that connection, and
+which way it runs, is settled. Across the recorded locks, **a third of real strains are that
+clear-cut**. The pick was spent either way; this is refusing to throw the receipt away.
+
+### 2b. Locks it has met before
+
+A chest's lock does not change, and it turns out that the offsets a lock shows the moment you open it
+almost always identify it: across 186 real chests, only one pair ever showed the same starting
+position, and the same chest re-opened showed the same one every time. So the tool ships a catalogue
+of locks already opened, adds every lock you open to it, and when it recognises one it skips learning
+entirely and goes straight to solving. Measured over all 186: **14% fewer moves, and every strain
+gone from the locks it recognises.**
+
+Nothing is taken on trust. A remembered wiring is checked before a key is pressed (it has to actually
+open the lock from where the lock is), and then every move is verified against what the plates really
+do, exactly as a freshly-learned one is. If a chest is somehow not the one remembered, the first
+surprise throws the memory away and learning proceeds normally.
+
+**Almost always**, because that identification is something measured, not something guaranteed. A
+four-plate lock has only 7⁴ possible starting positions and it does not use them evenly — each end of
+a plate's track turns up about twice as often as any other spot — so as the catalogue fills up, two
+chests eventually start out looking identical. It has happened: a four-plate chest was recognised as a
+different four-plate chest, and the first move of the plan strained the pick. Two things came out of
+that. The tool now refuses to recognise a starting position once it knows two chests share one — those
+are learned the ordinary way, and the banner says how many there are. And when a memory *is* wrong, the
+whole of it is dropped rather than the one row that gave it away, because the rest of it describes
+another lock entirely and reasoning from it can leave the tool unable to find any legal move at all.
+
+There is also one way a memory can be out of date, and that one is harmless by construction.
+Lockpicking skill changes the lock itself: **Trained removes one plate connection, Master removes
+another.** So a lock is a *simpler* version of its untrained self — and a move that is legal when more
+plates are dragged is still legal when fewer are. A memory recorded by a less skilled character can
+therefore predict the wrong outcome, which costs a move, but it can never make an illegal move look
+safe. The shipped catalogue was recorded untrained for exactly that reason.
+
+Those two cases are told apart by which way the difference runs. Training only ever *removes* a
+connection, so a lock that turns out to drag something the memory never mentioned cannot be the
+remembered chest at any skill level — and that is the signal that the starting positions merely
+collided.
 
 ### 3. Solving, from wherever it ended up
 
@@ -416,9 +463,12 @@ All code lives under the base package `io.github.markosa84.colonysskeletonkey`
 (`src/main/java/io/github/markosa84/colonysskeletonkey/`):
 
 - `AutoLockpick` — the entry point: DPI-aware startup, the F8 hotkey loop, the focus gate, and the
-  one place the concrete object graph is wired together.
-- `solver/` — the dependency-free domain core: `LockModel`, `Connection`, `Move`, `Cost`, and
-  `LockSolver` (the connection algebra `applyMove` plus the least-cost search).
+  one place the concrete object graph is wired together. Beside it, `LockHistory` writes every solved
+  lock to `captures/lock-history.txt` and `LockCatalog` reads them back — that file plus the bundled
+  `known-locks.txt` are what the tool remembers.
+- `solver/` — the dependency-free domain core: `LockModel`, `Connection`, `Move`, `Cost`,
+  `LockSolver` (the connection algebra `applyMove` plus the least-cost search), and
+  `ConnectionPrior` (what 186 real locks say about how a lock is wired, used to cost a gamble).
 - `vision/` — `Viewport` (the screen size, and the mapping from the calibrated 4K reference
   coordinates onto it), `GameScreen` (every Robot pixel grab: full capture, the fast lock-box
   composite, the pick-counter fingerprint), `LockReader` (pure frame analysis, headless-safe),
@@ -429,11 +479,14 @@ All code lives under the base package `io.github.markosa84.colonysskeletonkey`
   the `LockPoller` seam it watches the lock through.
 - `session/` — `LockSession` (learn-then-solve, the Free → Planned → Gamble escalation, the refusal
   memory), `Skill`, and the seam interfaces the session owns: `LockView`, `MoveExecutor`,
-  `CursorKeys`.
+  `CursorKeys`, `KnownLocks`.
 - `win32/` — the FFM bindings.
 
 Tests mirror the packages under `src/test/java/`, with `FakeGame` (a simulated lock with hidden
-connections and real strain/break/reset rules) driving the session tests, and the labelled frames
+connections and real strain/break/reset rules) driving the session tests. `LockCorpusTest` uses it to
+replay all 186 remembered locks at all three lockpicking levels — the session's equivalent of the
+reader's frame corpus, and the benchmark any change to the learning strategy has to beat
+(`gradlew corpus`; the ordinary test run does a fixed sample of it). Alongside are the labelled frames
 under [`src/test/data/frames/`](src/test/data/frames/) — the 34-frame 4K census, the
 `6p-gap-shadow` live-failure regression, the 21-frame 7-plate census and the 133-frame resolution
 sweep, deliberately not classpath resources so builds never copy the corpus around — driving

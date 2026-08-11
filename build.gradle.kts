@@ -3,9 +3,14 @@ plugins {
     jacoco
 }
 
-// Releases pass -PappVersion=1.2.3 (the git tag, minus the "v"). jpackage insists on a numeric
-// version, so the fallback is numeric too.
-version = (findProperty("appVersion") as String?) ?: "0.0.0"
+// Releases pass -PappVersion=1.2.3 (the git tag, minus the "v"). Every other build reads
+// version.txt - the same file release-please bumps - so a jar built from the working tree still
+// says which release it descends from, instead of the "0.0.0" the banner used to print. jpackage
+// insists on a numeric version, so both forms stay numeric; only the manifest below is marked.
+val releaseVersion = (findProperty("appVersion") as String?)?.takeIf { it.isNotBlank() }
+version = releaseVersion
+    ?: file("version.txt").takeIf { it.isFile }?.readText()?.trim()?.takeIf { it.isNotEmpty() }
+    ?: "0.0.0"
 
 java {
     toolchain {
@@ -52,7 +57,11 @@ tasks.named<JavaExec>("run") {
 tasks.jar {
     archiveVersion = ""
     manifest {
-        attributes("Implementation-Version" to project.version)
+        // A build from a working tree is not the release whose number it inherits from version.txt,
+        // so it is marked: without the suffix every self-built jar would report the last release in
+        // its bug reports, which is exactly the lie the manifest exists to prevent.
+        attributes("Implementation-Version" to
+                if (releaseVersion != null) "$version" else "$version+local")
     }
 }
 
@@ -79,6 +88,33 @@ tasks.test {
         events("skipped", "failed")
     }
     finalizedBy(tasks.jacocoTestReport)
+}
+
+/**
+ * The whole 186-lock corpus, every real chest this tool has opened, at all three lockpicking levels -
+ * the session's equivalent of the reader's frame gate. It is the benchmark any change to discovery
+ * argues against: it prints strains, plays and give-ups per plate count and per level, plus what
+ * recall saves.
+ *
+ * <p>It is a separate task because it is minutes, not seconds: a run is several least-cost searches
+ * and the sweep is hundreds of runs. `test` covers a fixed, deterministic sample of the same corpus
+ * (see LockCorpusTest), which is what keeps a regression in the hard locks from waiting for whoever
+ * remembers to run this.
+ */
+val corpus by tasks.registering(Test::class) {
+    group = "verification"
+    description = "Runs the whole lock corpus at every lockpicking level and prints the totals."
+    testClassesDirs = sourceSets["test"].output.classesDirs
+    classpath = sourceSets["test"].runtimeClasspath
+    useJUnitPlatform()
+    systemProperty("java.awt.headless", "true")
+    systemProperty("lockpick.corpus", "full")
+    filter { includeTestsMatching("*LockCorpusTest") }
+    outputs.upToDateWhen { false } // a benchmark is run to see the numbers, never to be skipped
+    testLogging {
+        showStandardStreams = true // the totals table IS the output
+        events("failed")
+    }
 }
 
 /**
@@ -117,7 +153,7 @@ tasks.jacocoTestReport {
 
 /**
  * The gate, wired into `check`. It is a ratchet, not an aspiration: the thresholds sit just under
- * what the suite actually reaches (94.9% line / 91.2% branch), so a change that stops testing
+ * what the suite actually reaches (94.7% line / 90.5% branch), so a change that stops testing
  * something fails the build - while a gate nobody can pass would only teach everyone to ignore it.
  *
  * The few percent that stay missing are the code a headless test JVM cannot reach:

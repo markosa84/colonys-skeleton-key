@@ -43,15 +43,29 @@ goes in one of the first three.
 # Build (assembles jar + start scripts, and runs the whole JUnit suite)
 & .\gradlew.bat build --console=plain
 
-# Just the tests (~30s; includes the 34-frame calibration gate, the live-failure regression
-# frames, the 21-frame 7-plate census, the 133-frame resolution sweep, the 7-frame HDR corpus and
-# the 4-frame dark 1440p corpus; no game, no display)
+# Just the tests (~3 min; includes the 34-frame calibration gate, the live-failure regression
+# frames, the 21-frame 7-plate census, the 133-frame resolution sweep, the 7-frame HDR corpus, the
+# 4-frame dark 1440p corpus, the 7p-strip-off-plate frame and a sample of the 186-lock solve
+# corpus; no game, no display)
 & .\gradlew.bat test --console=plain
 
 # One class, or one method (a @ParameterizedTest matches by METHOD name, not by its "seed 0"
 # display name). Single-quote the filter in PowerShell, as with any -D/-P arg.
 & .\gradlew.bat test --console=plain --tests '*LockReaderTest'
 & .\gradlew.bat test --console=plain --tests '*LockSolverTest.plansUseTheFewestSlidesPossible'
+
+# The SESSION's gate, and the only honest way to judge a change to discovery: all 186 real locks
+# from the bundled catalogue, at all three lockpicking levels, through the real LockSession against
+# FakeGame. Prints strains/plays/give-ups per plate count and per level, plus what recall saves.
+# ~15 minutes, which is why `test` runs only a fixed sample of the same corpus (LockCorpusTest).
+& .\gradlew.bat corpus --console=plain
+
+# Regenerate the bundled catalogue from a solve history, and print everything the corpus measures
+# (the numbers quoted under "What the solve history measures" - never hand-edit those).
+& .\gradlew.bat classes --console=plain
+& "$env:JAVA_HOME\bin\javac.exe" -cp build\classes\java\main -d build\tools tools\LockStats.java
+& "$env:JAVA_HOME\bin\java.exe" -cp "build\classes\java\main;build\tools" `
+    io.github.markosa84.colonysskeletonkey.LockStats --assume-skill untrained captures\lock-history.txt
 
 # Run the automation app. lockpick.bat builds if needed and sets the two required JVM flags;
 # `gradlew run` is equivalent. Optional arg = the game's process name.
@@ -62,6 +76,12 @@ goes in one of the first three.
 # tool read), and it is how the gamma corpus was captured: walk the lock through a known key protocol
 # by hand, one dump per step, with the tool never touching it.
 .\lockpick.bat --dump
+
+# Read with the reference reader instead of the default lattice one - the one switch that changes
+# what the tool SEES, so it is the first thing to try against a suspected reader bug, and the way to
+# reproduce a pre-1.5 read. Same flag on --diagnose. `-Dlockpick.reader=` and `-Dgame.process=` are
+# the property forms of this and of the process-name argument.
+.\lockpick.bat --reader=legacy
 
 # Replay a user's failure dump through the reader, offline: what it found, and what it made of it.
 # This is the FIRST thing to run on a "no lock detected" report - see the dead ends. The frame is
@@ -76,8 +96,22 @@ goes in one of the first three.
 
 - **`-PappVersion` is not yours to choose.** In a release it comes from **release-please**, which
   derives it from the conventional commits and owns `version.txt` and `.release-please-manifest.json`
-  — never hand-edit those, and never tag by hand. Pass any numeric value locally; it only names the
-  zip. AGENTS.md, "Commit messages are load-bearing", has the rules and the release flow.
+  — never hand-edit those, and never tag by hand. Omit it locally and the build reads `version.txt`
+  itself, so a locally built jar's banner says `1.5.0+local` (the release it descends from, marked
+  as a working-tree build) instead of the `0.0.0` it used to print; pass a numeric value only to
+  name the zip. AGENTS.md, "Commit messages are load-bearing", has the rules and the release flow.
+
+- **`tools/` holds the five generators, and none of them is in the build.** They are committed
+  because each *regenerates a number or an asset that is checked in* — so the checked-in thing is
+  never hand-edited. `LockStats` (the catalogue + every corpus figure), `ToneTable` (`Tone.FAMILY`),
+  `IconGen` (the `.ico`), `PinPixels` (what physically separates brass from steel, across gamma and
+  HDR), `ReaderBench` (the two readers scored against each other over the whole corpus). Two
+  invocation shapes, and the javadoc of each says which: single-file source mode
+  (`java tools/PinPixels.java`) or compiled against `build\classes\java\main` (`LockStats`, as above,
+  and `ReaderBench` — the launcher has **no `--source-path`** option, only `--source <version>`, so
+  the single-file invocation both this file and `ReaderBench`'s own javadoc used to give never ran).
+  A *throwaway* harness does
+  **not** go here — see AGENTS.md, "Throwaway harnesses go in the scratchpad".
 
 - **`gradlew run` / `lockpick.bat` launch `AutoLockpick`, an infinite global-hotkey loop** — never
   run it in a non-interactive/automated shell; it does not return. Only run it when a human will
@@ -86,8 +120,8 @@ goes in one of the first three.
   dependency and test-scoped — the app itself has none; JaCoCo is a build plugin, not a dependency).
   `LockReaderTest` must stay green on
   **every** frame — the 34-frame census, the `6p-gap-shadow` regression frame, the 21-frame `7p-*`
-  census, the 133-frame resolution sweep, the 27-frame `gamma` corpus, the 7-frame `hdr` corpus and
-  the 4-frame dark 1440p corpus (`captures/4`):
+  census, the 133-frame resolution sweep, the 27-frame `gamma` corpus, the 7-frame `hdr` corpus, the
+  4-frame dark 1440p corpus (`captures/4`) and the `7p-strip-off-plate` frame:
   every `LockReader` constant
   is fitted to the frames under `src/test/data/frames/`. Those PNGs are deliberately **not classpath resources** (the whole corpus
   would be copied into `build/` every clean build); the test task passes their absolute path as
@@ -99,7 +133,7 @@ goes in one of the first three.
   change, 407/407 still green. (JUnit 6's breaking changes — Java 17 baseline, the removed
   `migrationsupport` module, FastCSV replacing univocity — touch nothing here.)
 - **`gradlew build` also enforces coverage** (`jacocoTestCoverageVerification`, wired into `check`):
-  **≥94% line, ≥90% branch**, currently at 94.5/90.5. `win32` is excluded from the report *and* the
+  **≥94% line, ≥90% branch**, currently at 94.8/90.9. `win32` is excluded from the report *and* the
   gate — it is the FFM boundary, and a test of it would test Windows. What is left uncovered is only
   what a headless JVM cannot reach: `AutoLockpick.main` (owns a `Robot`, a `Toolkit` and an endless
   loop) plus its display-owning helpers (`awtScale`, `screenSize`, `environment` — a headless JVM
@@ -124,8 +158,15 @@ goes in one of the first three.
   script and the second working copy are gone. Consequences that still bind: **anything that needs a
   frame goes through `TestFrames`**, and the frame-driven classes **fail** rather than skip when the
   frames are missing — a skip would switch the reader's entire calibration off and still report a
-  green suite. CI therefore runs the real 223-frame gate, which is this project's only verification
+  green suite. CI therefore runs the real 226-frame gate, which is this project's only verification
   on a machine that is not the author's.
+  - **A frame is *read* through `TestFrames`; its *label* lives in `FrameCorpus`** — the two are
+    separate on purpose. `FrameCorpus.everyLabelledFrame()` is the whole corpus (**226** = 53 census
+    + 133 sweep + 27 gamma + 7 hdr + 4 dark + 1 strip-off-plate + 1 four-plate; `plate-count/`'s 3
+    carry a plate count only, so 229 PNGs on disk), and it is what `AnalyzerContractTest` judges both readers on. The readers used to carry
+    a private copy of the providers each — 241 labels stated twice, and nothing to notice when a
+    re-labelled frame was fixed in one copy and not the other. **A new group brings its own
+    `labels.txt` and is added here, never copied into a reader's test.**
 - Toolchain is pinned to Java 25 with `auto-download=false`; the daemon runs on JDK 25 and resolves
   the current JVM, so no toolchain fetch. (Dependency resolution for JUnit did need the network
   once.)
@@ -161,6 +202,19 @@ connections and the game's real strain/break/reset rules.
   (`LockSolverTest.plansUseTheFewestSlidesPossible` checks against brute-force BFS). **Do not expect
   WALLCLOCK to speed anything up**; the real win is F8 not resetting.
 
+  **`ConnectionPrior`** — how likely a slide is to strain, before anything is known about the plate.
+  Built from the 186-lock corpus (see "What the solve history measures"), it answers
+  `strainRisk(state, plate, dir, knownDrags)` so `LockSession.gamble` can rank *(plate, direction)*
+  by a number instead of by "fewest plates at an end". Nothing is ever *concluded* from it — it
+  orders candidates, and the lock still says what happened.
+
+  **`ModelRepair`** — pure graph math for the session's unsolvable-model recovery, and it lives
+  **here, not in `session/`**: `singleEditRank(m, from, p)` ranks how minimally plate `p`'s row could
+  be edited to make the goal reachable (0 flip one, 1 drop one, 2 flip the whole row, 3 add one), and
+  `reachesGoal(m, from)` is the reachability flood under it. It touches no session state — it is
+  reachability over configuration space, built on `LockSolver.applyMove`/`encode`/`isGoal` — so it is
+  unit-tested directly by `ModelRepairTest`. It only ever **names** a suspect; see the session.
+
 - **`vision/`** — everything pixels:
   - **Two readers behind one seam (`LockAnalyzer`: `detectPlateCount`/`readState`/
     `describe`).** **`LatticeReader` is the default** (`--reader=lattice`); **`LockReader` is the
@@ -175,7 +229,16 @@ connections and the game's real strain/break/reset rules.
     off-family (HDR, `Tone.isOffFamily()`) it ignores the curve — which cannot express HDR — and
     reads raw. Two design rules it took a while to get right, both pinned by `LatticeReaderTest`:
     the **tracing** gate ("plate or not?") is per-plate-local, the **void** gate ("how black shows
-    through?") is whole-frame-global (get them backwards the smallest modes fail). **A plate is a row
+    through?") is whole-frame-global (get them backwards the smallest modes fail). And "the plate"
+    means the plate, not the strip it is sampled in: a row's steel is the **bright population** of its
+    column medians (Otsu, `brightMedian`), never their plain median, because the strip is as wide as
+    the *widest* row can be and a plate that has slid does not fill it (see the dead end). That is
+    also why `HOLE_DARK` is **0.47** and not the 0.58 it was: the constant did not change meaning, its
+    denominator stopped being 1.2–1.7x too low. Measured band 0.41–0.53 over 78 frames. One consequence
+    to know when reading a dump: a strip centred on the **gap** between two plates clips their steel at
+    its edges, so a gap's `lit` can now read as high as a plate's (0.6–0.9 where it used to read 0.3).
+    `lit` no longer separates a gap from a plate — **the hole count does**, which is what the plate
+    count rests on anyway. **A plate is a row
     of six holes in lit steel and nothing else** — and above the **1280×720 read floor** every plate,
     centred or not, shows all six, so the reader needs no separate "centred" signal at all. It used to
     read a **pin-pop** to rescue a centred plate whose raised pin ate a hole at 800×600; that mode is
@@ -228,6 +291,16 @@ connections and the game's real strain/break/reset rules.
     certifies the parameterization itself; the 133-frame `front-plate-sweep` fixtures (one 5-plate
     lock, all 19 dev-machine display modes at/above the 1280×720 floor, 1280×720..4K) validate the
     scaling against real renders.
+  - **`ViewMapping`** — what that aspect-fit *reduces to*, and what the readers actually take:
+    `(scale, ox, oy)`, nothing else. **A reader needs to know where the lock lands and has no
+    business knowing how that was worked out.** Deriving it from the game window's measured rectangle
+    is one way to know, and it has the one failure mode the tool cannot see (measure the wrong
+    rectangle and every coordinate is wrong *together*, silently — `WindowedGameTest`); solving for
+    the lock's own hole lattice in the pixels is another, and what *that* would produce is not a
+    window rectangle at all. It is this. So take the answer, not the question — and don't hand a
+    reader a `Viewport` again. `ViewMapping.IDENTITY` is exactly `Viewport.REFERENCE`.
+  - **`Pixels`** — the shared low-level primitive (Rec. 601 luma of a packed ARGB pixel). It exists so
+    `GameScreen`, `Tone` and both readers don't reach into one particular reader for it.
   - **`GameScreen`** — the only Robot owner, and **the only class that applies the viewport's
     origin**: it keeps every box twice, view-local (what the reader sees, what the canvas uses) and
     translated onto the virtual desktop (what the grabber is asked for). `capture()` (the game's
@@ -314,6 +387,16 @@ connections and the game's real strain/break/reset rules.
     resets the puzzle can only be untrained. Reported, then forgotten. It is hedged on purpose: a
     pick carries damage between locks, so the first one a run breaks may arrive already worn and
     break at a count matching no level — say so rather than round it into a guess.
+
+    **The level changes the LOCK, not just the pick** (the game's own skill screen; the code's
+    `BASIC` is what the UI calls *Trained*): **Trained removes one plate connection, Master removes
+    another**. So the same chest is a **subset** of its untrained self at higher skill — which is the
+    whole reason recall is safe, *and* the test that tells a stale memory from someone else's chest:
+    a row that comes back with **more** in it than the memory had cannot be this chest at any level
+    (`Connection.rowContains`, `LockSession.discardRecall`). `LockSession.observedSkill()` reports what
+    a run saw, and `LockHistory` now writes it into the header, because an entry's level says whether
+    its model is the maximal one. A run where no pick broke saw nothing and records nothing, rather
+    than guessing.
   - **`LockSession`** (one per F8 press) — holds everything: `conn[p]` (null = unprobed), the
     refusal memory, the cached plan, the strain and pick counts. A single loop picks the next move —
     a discovery move while anything is unprobed, otherwise the head of the **cached** solution plan,
@@ -331,7 +414,7 @@ connections and the game's real strain/break/reset rules.
       opens, so a fully-probed model the solver cannot open (`allProbed` + no solution) has a misread
       connection in it. Rather than dump immediately, the session names the likeliest culprit — a
       plain reachability flood asks which plate's row could be edited to a solvable model (flip a
-      drag's direction, drop one, add one; `reachesGoal` + `singleEditRank`) — clears that plate, and
+      drag's direction, drop one, add one; `solver.ModelRepair`) — clears that plate, and
       lets discovery **re-probe** it from the configuration the lock is now in, where a
       configuration-specific misread reads differently. The edit only *names* the suspect; the fresh
       probe, not the edit, is trusted (**re-probe to confirm, never adopt a guess**), and every solving
@@ -349,6 +432,15 @@ connections and the game's real strain/break/reset rules.
       lock. That is what the "Stuck" message used to do after a reporter's 4-plate model of a 6-plate
       chest had strained nine times. A genuinely deadlocked lock still moves *some* plates, so the two
       cases do not collide (`LockSessionTest` pins both).
+  - **`SessionReporter`** — every line the session says to the player, in one place: the session
+    decides *what* happened, this decides how to phrase it, so the control flow reads as decisions
+    rather than prose. Two things bind. It is stateless and resolves `System.out` **at call time**,
+    because a run is teed to its log by swapping `System.out` for its duration
+    (`AutoLockpick.solveLogged`) and the tests capture that same stream — cache the stream and both
+    break. And **its strings are load-bearing: `LockSessionTest` asserts on substrings, so a reword
+    is a test change.** That is the point of gathering them; a message lives in exactly one spot.
+    The verbose move-by-move trace is a *separate*, file-only channel and stays on `LockSession`
+    (`traceTo`).
 
 - **`win32/Win32`** — Foreign Function & Memory (FFM) bindings into `user32.dll`/`kernel32.dll`:
   `GetAsyncKeyState` (F8); the DPI calls (below); `GetClientRect` + `ClientToScreen`
@@ -394,8 +486,27 @@ connections and the game's real strain/break/reset rules.
   literal `W/S/A/D` sequence. Success-only and never reset — the opposite intent to the per-F8 `RunLog`.
   A `(Path, Clock)` seam like `Captures`, so it tests headless. The write lives in `AutoLockpick`, the
   only place the recorder and the session meet: `LockSession` exposes `solved()` / `initialState()`
-  (snapshotted at the first read, before `cur` is overwritten) / `connections()`, and the composition
-  root feeds those plus `RecordingKeyboard.recorded()` to `history.record(...)`.
+  (snapshotted at the first read, before `cur` is overwritten) / `connections()` / `observedSkill()`,
+  and the composition root feeds those plus `RecordingKeyboard.recorded()` to `history.record(...)`.
+
+- **`LockCatalog`** (root) — the *read* side of the same file, and the reason a chest is never learned
+  twice. It implements `session.KnownLocks`, the session-owned seam (`recall` by the offsets shown at
+  F8, `matching` by the rows a run has already probed), so `LockSession` knows nothing about files and
+  every existing test gets `KnownLocks.NONE` by default. **Loaded once at startup** — the bundled
+  `src/main/resources/known-locks.txt`, then an overlay of `captures/lock-history.txt` — and from then
+  on it lives in memory: `AutoLockpick` calls `catalog.remember(...)` beside `history.record(...)` on
+  every solve, so **reloading a save and re-opening the same chest is recognised without restarting the
+  tool**. `LockHistory` stays the only writer to disk. One format, one parser: the shipped catalogue is
+  literally a history file minus the `keys` line, regenerated by `tools/LockStats.java`.
+
+  Where one key is known several ways, what that means is decided by the row algebra, not by a
+  preference. **One model containing the other** is the same chest at two skill levels, and the
+  most-connected one wins — see "Why recall cannot strain" below. **Neither containing the other** is
+  two chests sharing a starting configuration, and then the key is marked *ambiguous* and never
+  recalled again (`ambiguousKeys()`, shown in the banner); `matching()` keeps both, because one row
+  probed for real separates them at once. A row that was never probed (`3:?`) makes the whole entry
+  unusable and it is dropped, because a row assumed empty would be a *subset* model, which is exactly
+  the unsafe direction.
 
 ### Testing seams (four, all package-private — use them, don't add a fifth)
 
@@ -505,7 +616,7 @@ misread. A whole-run `loopingWithoutProgress` guard catches any residual no-prog
 did not. A *fully-probed* model the solver cannot open is likewise a misread, not a hard lock: a real
 lock is always openable and every move reversible, so `allProbed` + no solution ⇒ a mislearned
 connection. That is **recovered, not just dumped**: the session finds the plate whose row a single
-edit could make solvable (`singleEditRank`, a reachability flood over flip/drop/add edits), clears it,
+edit could make solvable (`ModelRepair.singleEditRank`, a reachability flood over flip/drop/add edits), clears it,
 and **re-probes** it from the configuration the lock is now in — where a configuration-specific misread
 reads differently — trusting the fresh probe, not the edit (*re-probe to confirm, never adopt a
 guess*). Only when that cannot correct it, within `MAX_RECOVERY_RESETS`/`MAX_RECOVERY_PICKS`, is the
@@ -537,6 +648,120 @@ plate hides nothing there; pinned by `LockSessionTest`.)
 `LockSessionTest` pins this machine against `FakeGame`: the deadlocked-lock budget (one strain per
 direction, then stuck, never a retry), the refusal memory across an UNTRAINED break-reset, model
 self-correction after a lying observation, and the five-pick give-up.
+
+### What the solve history measures (186 real locks — measured, don't re-derive)
+
+`captures/lock-history.txt` was write-only until 1.6: **211 solved runs over 186 distinct chests**,
+every one from an **untrained** character (15 broken picks say so outright and none says otherwise).
+Parsing and replaying it is where every number below comes from, and `tools/LockStats.java`
+regenerates them all. The recorded `W/S/A/D` streams **replay exactly**: 209 of 211 land on the
+all-zero goal, 190 of them under any skill model and 19 only once the untrained break-reset is
+simulated — which is how the corpus's skill was independently confirmed. (Two runs fit no model, both
+from before 2026-08-05; a pick that arrives already worn breaks early and explains it.) So the corpus
+is a faithful benchmark, not a log — and re-run that replay after any change that can write a model,
+because it is what would catch a run recording rows it never observed.
+
+| Finding | Number |
+| --- | --- |
+| `(plate count, offsets at F8)` → connections | **not quite a bijection — 1 collision in 186**, and see below |
+| `P(p drags q)` | 0.324 (1509 of 4654 ordered pairs) |
+| …by distance and by plate position | **flat**: 0.33/0.32/0.33/0.32, out-degree 1.2–1.8 everywhere |
+| Connection type | **55.4% INVERTED** |
+| Reciprocity | 0.268 vs 0.324 if independent — mildly *anti*-reciprocal |
+| **Connections per lock** | **never above 10**: 4p 4–6, 5p 5–10, 6p **4**–10, 7p 8–10 |
+| Fully isolated plates | 14 of 1019 (29 expected if in/out degree were independent) |
+| Starting offsets | −3 is 20.8%, +3 is 22.8%; every other offset 10–12% |
+| Plates at an end when a real strain happened | **1 → 33.8%**, 2 → 47.5%, 3 → 15.8%, 4 → 2.9% |
+
+**Every figure above moved by under a percentage point when the corpus grew by half** — which is
+itself a finding: the generator has no structure that a larger sample was going to reveal. Two claims
+did *not* survive, and both were sampling artefacts stated as rules:
+
+- **The recall key is not a bijection.** Two four-plate chests both start at `[3, 3, -3, -2]`. See
+  "The offsets identify the lock — nearly" below, and the dead end.
+- **A lock can have fewer connections than it has plates.** One six-plate chest has four
+  (`3:0N 4:0I 5:0N,3I` — three plates drag nothing), and its key stream replays cleanly, so it is
+  data. `ConnectionPrior` had a floor of `n` resting on that; it is gone. (It had never fired — the
+  measured mean is above `n` at every plate count — which is its own small lesson: a guard rail that
+  cannot trip is a claim, not a safeguard.)
+
+Three things follow, and they are the whole of the 1.6 work:
+
+- **The offsets identify the lock — nearly.** Hence `LockCatalog`: recall the model, skip discovery.
+  Measured over the whole corpus (`gradlew corpus`, untrained): **6192 plays recalled against 7181
+  probed — 13.8% fewer, 172 of 186 locks strictly cheaper — and 0 strains against 153.** The strain
+  number is the point; the move saving is uneven, because on some chests every discovery move already
+  lay on the solution path. (The sweep reports 2 strains, and both belong to the two chests that share
+  a key: those are deliberately *not* recalled, so they pay what probing costs. Every lock recall
+  actually covers spends none — the test fails if one does.)
+
+  **But the key is a measurement, not a theorem, and it does collide.** 7⁴ states for the smallest
+  lock, and the offsets are not uniform (each end of the track is ~21%, every other position 10–12%),
+  so the effective space is smaller still. Against the 186 locks now bundled, the chance a *new* chest
+  lands on a key already remembered is **1.5% at 4 plates** (15 keys over 16 locks), 0.7% at 5, 0.1%
+  at 6 — and it grows linearly as the player's own history fills up. It has happened, and the shipped
+  catalogue now contains the pair: two four-plate chests at `[3, 3, -3, -2]`, `lock 014` and the one
+  that exposed it. `LockCatalog` marks that key ambiguous and recalls neither; both are still named by
+  `matching()` off one probed row, and `LockCatalogTest` asserts the whole arrangement against the
+  shipped file. See the dead end below; `tools/LockStats.java` had always checked for this, but only
+  offline — nothing acted on it.
+
+- **Why recall cannot strain — as far as *skill* goes.** `applyMove` fails only by pushing an affected
+  plate off its track, and a *subset* model affects fewer plates by the same deltas — so **a move legal
+  under a superset of the truth is legal under the truth**. Trained/Master *remove* connections, so the
+  untrained catalogue is the maximal model of every chest in it, and recalling it at any skill
+  mispredicts at worst. Pinned, not argued: `LockCorpusTest` replays every lock at BASIC and MASTER
+  against the untrained memory and requires 0 strains. This is why an entry with an unprobed row is
+  dropped rather than read as "drags nothing".
+
+  **That argument is about the character, never about identity.** It says a memory of *this chest* is
+  safe; it says nothing about whether this is that chest. A memory of a *different* chest is neither
+  superset nor subset, and it can strain — which is exactly why `LockCatalog` no longer resolves a key
+  clash by keeping the most-connected model. Two models under one key are one chest at two skill levels
+  **iff one contains the other**; when neither does, the key names two chests and is refused outright
+  (`LockCatalog.ambiguousKeys`), because a coin flip between them is worse than probing.
+
+- **A strain is not information-free.** A slide is refused for exactly one reason, so the culprit is
+  among the plates at an end, dragged the one way that would push it off. A third of real strains have
+  exactly one candidate, which settles the connection *and its type* outright — `LockSession.deduceFrom`.
+  Deductions live in `deduced[]`, **never** in `conn[]`: `conn[p] != null` means "this row is complete",
+  which is what licenses `applyMove` to call a move legal, and a partial row can only ever prove the
+  opposite (`certainlyStrains`, which rules a move out from *any* configuration — strictly stronger
+  than the refusal memory).
+
+**And the honest scoreboard for the last two, because it is smaller than it sounds.** Measured on the
+124-lock corpus of the time, before and after adding `ConnectionPrior`-ranked gambling *and* strain
+deduction:
+
+| | plays | strains | breaks |
+| --- | --- | --- | --- |
+| old gamble ordering | 11083 | **217** | 33 |
+| risk-ranked + deductions | 11089 | **214** | 32 |
+
+**A 1.4% strain reduction, and six more slides** — concentrated at 4 plates (18 → 10 strains), flat at
+6 and 7, marginally *worse* at 5 (102 → 107). That is inside the noise of a search this chaotic: every
+changed choice re-rolls everything downstream. They are kept because each is principled and cheap (the
+deduction is prior-free, and `certainlyStrains` strictly generalises the refusal memory), **not because
+the corpus showed a win**. Don't expect a further tuning of the prior to pay: the connection structure
+is flat (see the dead end), so there is little left to extract. **The measurable win in 1.6 is entirely
+recall.** Anything proposed here goes through `gradlew corpus` before and after, or it does not go in.
+
+**A totals table is only comparable against a run over the SAME catalogue.** The corpus grows as locks
+are opened — 124 locks when the table above was measured, 186 now — so a change is argued by running
+the sweep twice on the catalogue in the tree, never against a number quoted from an older one.
+
+**The current baseline** (`gradlew corpus`, 186 locks × 3 levels = 558 runs):
+
+| | plays | strains | breaks |
+| --- | --- | --- | --- |
+| discovery, from scratch | 17590 | 335 | 56 |
+| recall (untrained) | 6192 vs 7181 probed | 0 (+2 on the shared key) | — |
+
+Re-measuring the prior's constants from those 186 locks — the per-size means and the INVERTED split —
+was put through the same two runs and came out **byte-identical, every row of the table**. That is the
+expected result and worth stating: the generator is structureless, so a better estimate of a flat
+distribution reorders almost no gambles. It also means the `n` floor that went with it cannot have
+been doing anything, which is how its removal was known to be safe before the tests confirmed it.
 
 ### Cross-file conventions (keep these consistent everywhere)
 
@@ -591,16 +816,28 @@ others silently breaks the automation. `KeySenderTest` and `LockSolverTest` pin 
 census, the `6p-gap-shadow` regression frame (a live failure dump whose labels the user established by
 marking every hole), the **4K 7-plate census** (`7p-*`), the 133-frame resolution sweep (19 display
 modes × 7 states, floored at 1280×720), the **27-frame `gamma` corpus** (the game's slider end to
-end — see below), and the **4-frame dark 1440p corpus** (`captures/4`, the reports this recovery work
-came from — see below).
+end — see below), the **4-frame dark 1440p corpus** (`captures/4`, the reports this recovery work
+came from — see below), the **`7p-strip-off-plate` frame** (the 7-plate chest that reported "no
+lock" because one row would not resolve — see the dead end), and the **`4p-dark-casing` frame**
+(the corpus's only labelled **4-plate** lock, and the one place the dark front casing has to be
+rejected at a four-plate fan's front — four is the fan most at risk, being the middle of a six-plate
+one, and it had no offset labels at all until this frame).
 `LatticeReader` matches `LockReader` frame-for-frame (165/165 plate counts, 883/883 offsets) and
 additionally reads what `LockReader` refuses (−1): the **7-frame `hdr/` corpus** (the first labelled
 HDR frames, pinned by `HdrCorpusTest`) and the faintest dark report. `LatticeReaderTest` also pins the
 whole-corpus safety invariants (never a wrong plate count, offsets in range).
 `CaptureBoxTest` proves the capture box contains everything the reader samples — any plate count, any
-offsets, any viewport — with a safety belt. The full suite is **~1985 tests** across
-solver/vision/control/session and the root, and **every class outside `win32` is covered** (94.5%
-line / 90.5% branch, gated at 94/90 — see "Testing seams" below).
+offsets, any viewport — with a safety belt. The full suite is **~2060 tests** across
+solver/vision/control/session and the root, and **every class outside `win32` is covered** (94.8%
+line / 90.9% branch, gated at 94/90 — see "Testing seams" below).
+
+**The session has a corpus of its own now, and it is the reader's frame gate for the other half of the
+tool**: `LockCorpusTest` drives the real `LockSession` against `FakeGame` over the 186 bundled locks at
+all three lockpicking levels, and prints strains/plays/breaks per plate count and per level. `gradlew
+test` runs a fixed, deterministic **sample** of it (every 25th lock plus the ones a full sweep found
+hardest, untrained only) so the suite stays minutes rather than tens of minutes; `gradlew corpus`
+sweeps everything. Any change to discovery is argued against its totals — see "What the solve history
+measures".
 
 **The gamma slider is covered end to end** (`gamma/`, 27 frames, `src/test/data/frames/gamma/labels.txt`).
 The same 7-plate chest, the same key protocol, replayed at every setting from 1.2 to 3.2 — plus the
@@ -685,7 +922,9 @@ Full numbers, method and spread are in `docs/INTERNALS.md` "Measured timings". T
   lockpick-counter grabs (now only taken when a move might have strained), 0.9s of keys. The
   slide *count* is near-irreducible — 22 of those 33 are the solution itself, 11 are discovery — so
   a big lock is simply a long run. **Below the animation floor there is nothing left to win without
-  giving up the observe-every-move contract.**
+  giving up the observe-every-move contract** *for a lock the tool has never seen*. For one it has,
+  the discovery third goes away entirely: recall skips it, and the run is exactly the solution (13.9%
+  fewer slides over the whole corpus, and every one of those slides was ~320ms of animation).
 - **Capture, not image processing, is the cost.** A full 4K `capture()` is ~79ms; `readState` on it is
   ~8ms. `GameScreen.captureLock()` grabs only the lock's 1300x1120 box (~23ms; enlarging it from
   1200x1000 for the safety belt measured cost-free — the grab's fixed overhead dominates) and
@@ -757,6 +996,51 @@ centered** (it does not slide with the offset).
 
 ### Dead ends — don't re-derive these
 
+- **Connections have no positional structure. This was measured over 186 real locks and there is
+  nothing there.** The tempting heuristics — "adjacent plates are linked more often", "the front plate
+  drags more", "a plate that drags nothing is dragged by everything" — are all flat: `P(p drags q)` is
+  0.32–0.33 at distance 1, 2, 3 and 4 alike, and the average out-degree is 1.2–1.8 at *every* plate
+  position of *every* lock size. Do not fit a distance kernel or a per-position weight; there is no
+  signal to fit — and **growing the corpus by half moved every one of those figures by under a
+  percentage point**, which is what "no structure" looks like when you go back and check. What is real
+  is much simpler and is what `ConnectionPrior` uses: the **total** is budgeted (`connections ≤ 10`,
+  no exceptions in the corpus), so the odds sharpen with every row probed — a six-plate lock with
+  eight connections already seen has at most two left over ten unknown pairs, 0.15 rather than 0.32.
+  The only other real skew is the type split (55.4% INVERTED), and its whole effect is that the two
+  directions of one slide differ in risk (**0.33 vs 0.40** on a fresh six-plate lock with three plates
+  parked at one end) — exactly the difference the old "fewest plates at an end" rule could not see.
+  The **lower** end is not a bound to lean on: "at least `n`" held over 124 locks and fails at 186.
+
+- **A remembered model that strains is a DIFFERENT CHEST, not a trained character — and the whole
+  memory has to go, not the row it was caught on.** This is a proof, not a heuristic: training only
+  ever *removes* a plate connection, so a memory of this chest can only be a superset of the truth,
+  and a move legal under a superset is legal under the truth. A strain on a slide the memory called
+  legal is therefore impossible for the same chest at any level, and the same goes for an observation
+  that *adds* a connection the memory lacks. Both mean the offsets collided (`LockSession.discardRecall`;
+  `Connection.rowContains` is the one predicate that tells the two apart, and `SessionReporter` phrases
+  both). Dropping only the contradicted row — which is what the code used to do — leaves the rest
+  standing as fiction about another lock, and `planUnblock` and `repositionForFreshGamble` search
+  **only over plates whose rows are "known"**: under that fiction no move at all is legal, discovery
+  dead-ends, and a lock the reader read perfectly is reported as *"the lock I read is not the lock on
+  screen … a bug in this tool"*. That cost a real player three F8 presses, several strains and a
+  lockpick on a 4-plate chest at `[3, 3, -3, -2]` (2026-08-11; the frame is now the
+  `4p-dark-casing` fixture, and it reads correctly). Two consequences that are easy to get wrong:
+  - **A break must not swallow the correction.** The `pickBroke` branch of `step` used to `return`
+    before the row was invalidated, so the next pass re-solved to the same plan and replayed the very
+    move that had just strained, for a second strain. The model correction now happens first.
+  - **`moves == 0` only means "the reader is wrong" when nothing was recalled.** With a memory in
+    play there is a second explanation and it is the likelier one, so the run says so and dumps
+    `false-recall` instead of `wrong-model`. Telling a player to report a vision bug over a frame that
+    read perfectly is how this investigation started in the wrong layer.
+- **The solving tier needs no refusal gate, and adding one is dead code.** Every discovery tier screens
+  its move through `worthTrying` (`isRefused`, `certainlyStrains`); `solvingMove` screens nothing, and
+  that looks like an oversight. It is not. A refusal is only ever recorded in `step`, which clears the
+  mover's row in the same breath — so the instant a slide is refused its plate is unprobed, `allProbed`
+  is false, and there is no plan to propose it again. A guard was written, given a once-per-plate cap
+  (without one it spins: the correction costs no key, and every pass counts as progress, so the loop
+  guard never sees a repeat), and then **could not be reached by any constructed scenario** — 60
+  injected phantom-strain runs over a real 6-plate lock never hit it. It went back out rather than ship
+  untested. If you think you have found a case, it needs a *misread*, not just a hard lock.
 - **A tone curve cannot be extrapolated past its anchors. This was tried and it destroys the reader.**
   The obvious shortcut is to fit a two-parameter `gain × power` curve through the pick-counter
   panel's two *dark* anchors (28 and 75) and call it the gamma. Measured against a real 3.2 frame, it
@@ -792,11 +1076,35 @@ centered** (it does not slide with the offset).
     completely — no size threshold exists. `CLUTTER_ALLOWANCE` was the workaround, and what it really
     did was **switch the check off on any busy frame**, which is the hole the wrong-model bug walked
     through. It is gone. Don't reintroduce it.
+  - **…but one row that will not resolve is not a smaller lock either — it is one row.** The fan's
+    count is carried by its **ends**, so `LatticeReader.detectPlateCount` requires every row to be
+    **lit steel** and lets **one** of them fail to walk its six holes (`MAX_UNRESOLVED_ROWS = 1`); it
+    reads `UNKNOWN`, which `LockSession` has always known how to recover. Demanding seven perfect rows
+    cost a real 7-plate chest entirely — six rows read 6/6, the back one read 3/6, and the player was
+    told there was no lock (`7p-strip-off-plate`). Two failures still refuse, which is what keeps the
+    tolerance away from a wrong-parity fan: an even lock's plates sit on the half steps between an odd
+    one's, so the wrong fan lands in the *gaps*, and gaps have no holes at all. **The beyond-check is
+    not relaxed with it** — it can only ever take a lock away, so it still needs a whole six-hole row.
   - **A plate is a row of six holes, and nothing else in a room is.** `plateBeyond` asks the hole rows
     instead: measured at every resolution, the row one step past a genuine 4/5-plate lock's end holds
     **0** holes, and where a real plate sits it holds **6**. `PLATE_MIN_HOLES = 3` is the midpoint of
     that. It costs one rotation, paid only when a fan of 4 or 5 actually fits (a 6- or 7-plate lock
     never reaches it), so it is once per F8, not per poll.
+- **A plate's steel cannot be measured by the MEDIAN of the strip it is sampled in — the strip runs
+  off the end of the plate, and how far depends on that plate's offset.** `Fan.metalAtDepth` samples
+  `2·ROW_MAX_DX + 1` px because a row *can* be that wide; a plate that has slid to an end is not, and
+  the plates recede besides. On the `7p-strip-off-plate` chest the back plate sat at **+3**, its body
+  ended ~170px right of its pin, and the remaining ~175px of strip read a median of **8** — the black
+  room. A quarter of the strip off the plate plus the fifth that is the six holes outvoted the steel:
+  the median came back **162** where the steel between the holes reads **210–255**. Every gate is a
+  fraction of that number, so the tracing gate collapsed from ~145 to ~80, three of that row's six
+  holes traced as fragments (34/46, 51/67 px) or landed **8 px** under the 150 px area floor, the row
+  walked 3/6 — and the whole lock was reported as no lock. Take the **bright population** instead
+  (Otsu on the column medians, then its median): parameter-free, because what varies row to row is
+  precisely *how much* of the strip is not plate, so any fixed percentile is a number fitted to one
+  screen. Note this is not free — it re-references **every** gate downstream, which is why `HOLE_DARK`
+  had to be re-measured from 0.58 to 0.47. A narrowed strip and a p65/p75 both also work on this
+  frame; the bright population is preferred because it needs no width and no fraction.
 - **"No lock detected" over a frame that looks fine means the COORDINATES are wrong, not the pixels.**
   Do not go looking at thresholds. A viewport that describes the wrong rectangle cannot fail loudly —
   `detectPins` clamps its scan box to the frame, finds nothing, and returns -1, while the dump (the

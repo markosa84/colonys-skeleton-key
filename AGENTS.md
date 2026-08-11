@@ -3,10 +3,16 @@
 Build, run and architecture live in `CLAUDE.md`. Code-level gotchas live in
 `src/main/java/AGENTS.md`. This file is about the *workflow* — the things that cost time.
 
-- **The automated check is `gradlew test`** (JUnit 6; ~1985 tests, including the screen-reader gate over
-  all 224 labelled frames; no game, no display). `gradlew build` wires it into `check`, **and with it
+- **The automated check is `gradlew test`** (JUnit 6; ~2060 tests, including the screen-reader gate over
+  all 226 labelled frames; no game, no display). `gradlew build` wires it into `check`, **and with it
   a JaCoCo coverage gate** (≥94% line, ≥90% branch, `win32` excluded). A change that stops testing
   something fails the build — raise the floor when coverage rises, never lower it to fit a change.
+
+- **A change to discovery is judged by `gradlew corpus`, not by reasoning about it.** All 186 real
+  locks the tool has opened, at all three lockpicking levels, through the real `LockSession` against
+  `FakeGame` — it prints strains, plays and breaks and that table is the argument. ~15 minutes, so
+  `gradlew test` runs a fixed sample of the same corpus. Record the before and after; two of the
+  session's "obvious improvements" only turned out to be improvements because this existed.
 
 - **A user's bug report is a PNG, and the answer is usually in the sidecar next to it.** A failed read
   dumps `captures/<tag>-<stamp>.png` **and** a `.txt` with the viewport, the environment, **the gamma
@@ -17,6 +23,16 @@ Build, run and architecture live in `CLAUDE.md`. Code-level gotchas live in
   `gradlew run '--args=--diagnose <png>'`, no game needed — *before* touching the reader. See CLAUDE.md's
   dead ends: a frame that reads correctly offline was never the problem (the live *rectangle* was
   wrong), and one that does not may simply be at a gamma nobody calibrated for.
+
+- **Read the run log before you believe the dump's tag.** The tag is the session's *hypothesis* about
+  what went wrong, and one of them used to be routinely wrong: `wrong-model` says "the plate count or
+  the offsets are misread — a bug in this tool", which is only sound when every connection row came off
+  the screen. If the log says **"I have opened this lock before"**, suspect the memory first: two chests
+  can start at the same offsets, and the catalogue is keyed on nothing else. That case now dumps
+  `false-recall` and says so, but the lesson generalises — `--diagnose` the frame before touching the
+  reader, and a frame that reads correctly offline was never the problem. Three F8 presses, several
+  strains and a lockpick went into that mistake once, on a 4-plate chest the reader had read perfectly
+  every time.
 
 - **When you must change the reader, the corpus is the argument — and it costs the player nothing to
   extend.** Both the resolution sweep and the gamma corpus rest on the same trick: **game state depends

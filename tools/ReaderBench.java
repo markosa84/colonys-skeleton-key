@@ -16,8 +16,14 @@ import io.github.markosa84.colonysskeletonkey.vision.Viewport;
  * Scores {@link LockReader} and {@link LatticeReader} against each other, over every labelled frame in
  * the corpus and over the HDR dumps that defeat the first one.
  *
+ * <p>Compiled against the built classes, like {@code LockStats}. (It used to say
+ * {@code java --source-path src/main/java tools/ReaderBench.java}, which never ran: the launcher has
+ * no {@code --source-path} - that is javac's option - only {@code --source <version>}.)
+ *
  * <pre>
- *   java --source-path src/main/java tools/ReaderBench.java
+ *   gradlew classes
+ *   javac -cp build\classes\java\main -d build\tools tools\ReaderBench.java
+ *   java -cp "build\classes\java\main;build\tools" ReaderBench
  * </pre>
  *
  * <p>The answer, in numbers, and it is why {@link LatticeReader} is now the default:

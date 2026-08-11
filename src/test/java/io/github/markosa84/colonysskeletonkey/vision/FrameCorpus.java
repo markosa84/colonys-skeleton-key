@@ -25,7 +25,8 @@ import org.junit.jupiter.params.provider.Arguments;
  *   <li><b>The 4K census</b> - slide sequences where each frame differs from the last by exactly one
  *       plate step, so a reader wrong on any one frame breaks the whole sequence's arithmetic. Stated
  *       here, in {@link #censusFrames}, with the provenance of each sequence.</li>
- *   <li><b>The resolution sweep</b>, <b>the gamma slider</b> and <b>the HDR corpus</b> - each a replay
+ *   <li><b>The resolution sweep</b>, <b>the gamma slider</b>, <b>the HDR corpus</b> and the single-frame
+ *       groups - each a replay
  *       of one key protocol, and each labelled by that protocol rather than by a reading: game state
  *       depends on the keys sent, not on the pixels that come back. Their labels are recorded beside
  *       the frames in a {@code labels.txt}, together with the protocol that establishes them, so they
@@ -198,6 +199,39 @@ final class FrameCorpus {
     }
 
     /**
+     * The 7-plate chest whose back plate's sampling strip ran off the end of the plate:
+     * {@code (frame, viewport, offsets)}. A live "no lock detected" dump over a screenshot that looks
+     * perfectly fine - six rows walked 6/6 and the seventh walked 3/6, which was enough to lose the
+     * whole lock. Its labels come from a raw-luminance census of the hole lattice, not from a reader;
+     * {@code 7p-strip-off-plate/labels.txt} records that census and what the frame pins.
+     */
+    static Stream<Arguments> stripOffPlateFrames() {
+        Map<String, int[]> labels = labels("7p-strip-off-plate");
+        List<Arguments> frames = new ArrayList<>();
+        labels.forEach((name, offsets) ->
+                frames.add(Arguments.of("7p-strip-off-plate/" + name, Viewport.REFERENCE, offsets)));
+        return frames.stream();
+    }
+
+    /**
+     * The corpus's only labelled <b>four-plate</b> lock: {@code (frame, viewport, offsets)}. Four is
+     * the fan most at risk of being confused for another, since the fans of {@code n} and
+     * {@code n + 2} share a lattice and a four-plate lock therefore sits exactly inside a six-plate
+     * one. Every other labelled frame here is 5, 6 or 7 plates, so until this one nothing pinned that
+     * ambiguity from the four-plate side - and the lock's dark front casing lands precisely where a
+     * six-plate fan's front row would be. Its labels come from a raw-luminance census of the hole
+     * lattice at every depth a plate could sit at; {@code 4p-dark-casing/labels.txt} records it, and
+     * why the frame exists at all.
+     */
+    static Stream<Arguments> fourPlateFrames() {
+        Map<String, int[]> labels = labels("4p-dark-casing");
+        List<Arguments> frames = new ArrayList<>();
+        labels.forEach((name, offsets) ->
+                frames.add(Arguments.of("4p-dark-casing/" + name, Viewport.REFERENCE, offsets)));
+        return frames.stream();
+    }
+
+    /**
      * The front-plate sweep at every one of the 19 display modes: {@code (frame, viewport, offsets)}.
      * One 5-plate lock, one key protocol, replayed from a fresh R at each mode - so the states read
      * once at 4K are every mode's states too, which is the claim {@code labels.txt} records and this
@@ -223,6 +257,8 @@ final class FrameCorpus {
         gammaFrames().forEach(frames::add);
         hdrFrames().forEach(frames::add);
         darkFrames().forEach(frames::add);
+        stripOffPlateFrames().forEach(frames::add);
+        fourPlateFrames().forEach(frames::add);
         sweepFrames().forEach(frames::add);
         return frames.stream();
     }

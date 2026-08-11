@@ -1,0 +1,753 @@
+# The Colony's Skeleton Key - locks this tool has already opened.
+#
+# Regenerate with tools/LockStats.java; see its javadoc. Same block format as
+# captures/lock-history.txt, minus the keys line, so entries can be copied across.
+#
+# The lockpicking level matters here: Trained removes one plate connection and Master
+# removes another, so a lock recorded UNTRAINED is the maximal model of its chest -
+# and a maximal model is the one recall cannot strain on, at any skill.
+
+lock 001 | 6 plates | untrained
+  init  [1, 0, -1, -3, 0, 0]
+  conn  1:3N,4I  2:4N,5I  3:1I  4:0I,2I,3I  5:4I
+
+lock 002 | 5 plates | untrained
+  init  [-3, -3, -3, -1, 3]
+  conn  0:2I  1:0I,2N  3:0I,1I,2I,4I  4:2I,3N
+
+lock 003 | 5 plates | untrained
+  init  [3, 3, 2, -2, -1]
+  conn  0:2I  1:0I,4I  3:1N,2I  4:0I,2N,3I
+
+lock 004 | 6 plates | untrained
+  init  [3, 3, 0, 1, 0, 0]
+  conn  0:5N  1:2I  2:1I,5I  3:5I  4:3N  5:1I,4I
+
+lock 005 | 5 plates | untrained
+  init  [-1, 3, -2, -1, 1]
+  conn  0:4I  1:0I,3N  2:0N,1N,4N  3:0I,4I  4:0I,2N
+
+lock 006 | 5 plates | untrained
+  init  [-2, 3, -1, 0, 2]
+  conn  0:2N  1:0I,2N,3I  4:0I,1I
+
+lock 007 | 5 plates | untrained
+  init  [1, -2, 3, -1, 0]
+  conn  0:2I  1:0N,4I  2:1N,3N,4I  3:1I,4N  4:2I,3I
+
+lock 008 | 6 plates | untrained
+  init  [3, -2, 2, 0, 0, -2]
+  conn  0:3I  1:0N,3N  3:2N  4:0I,3N  5:0N,4N
+
+lock 009 | 6 plates | untrained
+  init  [3, 3, -2, 2, 1, 1]
+  conn  0:3I  1:0I,5I  2:3I,5N  3:0I,1N,4I  4:0I,3N
+
+lock 010 | 6 plates | untrained
+  init  [-3, 1, -3, -1, 1, -3]
+  conn  0:4I  1:3N  2:5I  4:1I,3N  5:3I,4I
+
+lock 011 | 6 plates | untrained
+  init  [3, 1, 0, -2, -2, 2]
+  conn  0:1I  1:4N  2:0N,1N,3I  5:0I,2N,3N,4I
+
+lock 012 | 5 plates | untrained
+  init  [-3, 2, 1, -2, 3]
+  conn  0:2I,3N  1:3N  2:0I,4I  3:0N,2N,4N  4:2N,3I
+
+lock 013 | 5 plates | untrained
+  init  [-3, 0, 3, 3, -1]
+  conn  0:2N  1:0I  3:0N,2N,4I  4:0N,1I
+
+lock 014 | 4 plates | untrained
+  init  [3, 3, -3, -2]
+  conn  0:1I,2I,3N  1:2N  3:1I,2I
+
+lock 015 | 5 plates | untrained
+  init  [3, -3, -2, -1, 2]
+  conn  1:0I,2I,3N  2:0I  3:0N  4:1N
+
+lock 016 | 4 plates | untrained
+  init  [-1, 1, -3, -3]
+  conn  0:2I,3N  1:2N  2:1I,3I  3:0I
+
+lock 017 | 5 plates | untrained
+  init  [3, 1, 2, 0, 1]
+  conn  0:4I  1:2I  2:3N,4I  3:4I  4:1I,2I
+
+lock 018 | 7 plates | untrained
+  init  [0, 0, 1, -3, 1, 2, -1]
+  conn  0:4I,6N  1:5I,6I  2:4I  3:5N  4:1I,2N  5:4I  6:2N
+
+lock 019 | 6 plates | untrained
+  init  [-3, -2, -1, -3, 2, 1]
+  conn  0:2N  1:0I,4N  2:0N,4N  3:0I  4:0I,2N,5I  5:2I
+
+lock 020 | 7 plates | untrained
+  init  [-3, 3, -1, -2, 0, -1, -1]
+  conn  0:1N,3I,6I  1:2N,4I  2:5I  4:1N,5I
+
+lock 021 | 5 plates | untrained
+  init  [3, -3, -1, -3, -3]
+  conn  0:1I  1:3I  2:3N  3:0N,2N  4:3I
+
+lock 022 | 5 plates | untrained
+  init  [-2, -3, 1, 0, -2]
+  conn  0:3N  1:2N  3:1N,4N  4:0I,1I,3I
+
+lock 023 | 5 plates | untrained
+  init  [-3, -3, -3, 3, -1]
+  conn  0:2I,4N  1:2N,4I  2:4I  3:0N  4:1N,3N
+
+lock 024 | 5 plates | untrained
+  init  [0, -2, -3, 3, -3]
+  conn  0:4I  1:2I  2:4I  3:0I,1N,2N,4I
+
+lock 025 | 4 plates | untrained
+  init  [-2, -2, -3, 3]
+  conn  0:2I  1:3N  2:1I  3:1I,2N
+
+lock 026 | 6 plates | untrained
+  init  [1, 3, -2, -3, 1, -2]
+  conn  0:1I,2N  1:0N,2I  2:1I,3I  3:5I  5:0I,1N,4I
+
+lock 027 | 5 plates | untrained
+  init  [3, 3, 1, -1, -3]
+  conn  0:2I  1:3I  2:1I,3N  4:2N,3I
+
+lock 028 | 4 plates | untrained
+  init  [3, 3, -3, -3]
+  conn  0:2I  1:0I  2:3N  3:0I,1N,2I
+
+lock 029 | 6 plates | untrained
+  init  [3, -3, 3, -2, -3, 3]
+  conn  1:3N  2:3I,5N  3:0N  4:2N,3N,5I  5:1I
+
+lock 030 | 5 plates | untrained
+  init  [-3, -2, -3, 3, -3]
+  conn  0:2I,3I,4N  1:2I,3I,4N  3:4I
+
+lock 031 | 5 plates | untrained
+  init  [2, -3, -3, 2, -3]
+  conn  0:1N,3I  1:3I,4I  2:3N,4I  3:2N  4:1N,2I
+
+lock 032 | 6 plates | untrained
+  init  [-3, -3, 2, 0, -3, 2]
+  conn  0:4I,5I  1:3I  2:4I  3:2I  4:0N  5:4N
+
+lock 033 | 5 plates | untrained
+  init  [0, -3, -3, -2, -1]
+  conn  0:1N,3I  2:0I,1I,3I  4:0I,1I
+
+lock 034 | 5 plates | untrained
+  init  [-1, 1, -3, 0, 3]
+  conn  0:3N  1:2N,3I  2:1N  3:0I,4N  4:0N,2I
+
+lock 035 | 6 plates | untrained
+  init  [-2, -1, 3, -3, 0, -1]
+  conn  0:2I,3I,5I  1:3N,5I  3:1N  4:0I,1I,3I  5:4I
+
+lock 036 | 6 plates | untrained
+  init  [2, 3, 3, 3, -1, -3]
+  conn  0:4I,5N  1:0N,2I  2:4I  3:2I  4:0N,5I  5:0I
+
+lock 037 | 4 plates | untrained
+  init  [-3, 2, 3, -1]
+  conn  0:1N,2I,3I  2:0N,1N  3:2N
+
+lock 038 | 6 plates | untrained
+  init  [-3, -2, 1, -3, -2, -3]
+  conn  1:4N  2:0N,1I  3:1I,5I  4:5N  5:1I,4I
+
+lock 039 | 6 plates | untrained
+  init  [1, 1, 3, 1, 0, -2]
+  conn  0:5N  1:0N,2I  2:0N,3I,4I  3:1I,5N  5:3N,4I
+
+lock 040 | 6 plates | untrained
+  init  [-2, -1, 0, 3, -3, 3]
+  conn  0:3I,5N  1:2N,5I  4:0I,1N,2N,5N
+
+lock 041 | 6 plates | untrained
+  init  [0, 0, 0, -1, 0, 1]
+  conn  0:1N,4I  1:5N  3:0I,5N  4:5N  5:1I,2N,3N
+
+lock 042 | 5 plates | untrained
+  init  [-3, 3, 1, 3, -2]
+  conn  0:1N,3I  1:4I  2:4N  4:0N,1N,3N
+
+lock 043 | 5 plates | untrained
+  init  [1, 2, -2, 3, -1]
+  conn  0:4N  1:2N  2:3I,4I  3:4I  4:0I,1I,2I,3I
+
+lock 044 | 5 plates | untrained
+  init  [-2, 2, 3, -3, -1]
+  conn  0:1N,3N  1:3N  2:1I,3N,4I  4:0N,1I
+
+lock 045 | 6 plates | untrained
+  init  [3, 0, 3, 0, 0, 3]
+  conn  0:1N,3I  2:0I  3:4I  4:0I,2I
+
+lock 046 | 6 plates | untrained
+  init  [0, 1, 0, 3, -3, -3]
+  conn  0:1N  3:0I  4:0N,3N  5:0I,1N,2N,3N
+
+lock 047 | 6 plates | untrained
+  init  [-2, 1, -1, 3, -3, -3]
+  conn  0:2I,3N  1:4I  2:3I,4N,5I  3:0N  4:0N  5:0I
+
+lock 048 | 6 plates | untrained
+  init  [2, 1, 0, -1, -3, 3]
+  conn  0:4N,5N  1:2I  2:3N,5I  3:4I  4:5N
+
+lock 049 | 5 plates | untrained
+  init  [-3, 3, 1, 1, 2]
+  conn  0:1I,4N  1:0N,2I  2:0N,1N,3I  3:1I,2I
+
+lock 050 | 6 plates | untrained
+  init  [-1, 0, -2, -1, 3, 2]
+  conn  0:1I,2N,3N  3:0I,4I,5I  4:1N,2N  5:3I
+
+lock 051 | 6 plates | untrained
+  init  [-3, 1, -3, 1, -1, 0]
+  conn  0:2I  1:0I,3N  2:0I,4N  4:2I,3I  5:2I
+
+lock 052 | 5 plates | untrained
+  init  [1, 3, 1, 2, 3]
+  conn  0:4I  1:0N  2:0N,3I  3:0N,2I,4I  4:2I
+
+lock 053 | 5 plates | untrained
+  init  [-2, -1, 0, -3, -2]
+  conn  1:2N  2:0I,1N,3N,4I  3:2I,4I  4:2I
+
+lock 054 | 5 plates | untrained
+  init  [-2, -2, -3, 3, 3]
+  conn  0:4I  1:0I,2I,3N,4I  2:1N,3N  3:2N  4:1I
+
+lock 055 | 5 plates | untrained
+  init  [-3, 0, 1, -3, 2]
+  conn  0:1N  2:3N  3:0N,4N  4:0I,1N
+
+lock 056 | 5 plates | untrained
+  init  [-2, 3, 2, 3, 2]
+  conn  0:1N,4I  1:2I  2:0N,1N,3I,4I
+
+lock 057 | 6 plates | untrained
+  init  [-1, -3, -3, 3, -3, 1]
+  conn  1:0I,2I,3N  2:0N  4:0N,2I,5N
+
+lock 058 | 5 plates | untrained
+  init  [1, -3, -3, -1, -2]
+  conn  1:0I,2I  2:0N,4N  3:0N,2I  4:0I,1N,3I
+
+lock 059 | 5 plates | untrained
+  init  [1, -3, -3, -2, 2]
+  conn  0:3N  1:2I  2:0N,4I  3:0N,2N
+
+lock 060 | 6 plates | untrained
+  init  [-1, -3, 2, -2, -2, 3]
+  conn  0:2I,4N  1:4I  2:1N  3:0N,1I,5N  5:1N
+
+lock 061 | 5 plates | untrained
+  init  [3, -1, 2, 0, 0]
+  conn  0:1I  2:3I,4I  3:0I,1I,2I  4:2N
+
+lock 062 | 4 plates | untrained
+  init  [-3, 3, -3, 2]
+  conn  0:1N,2I  2:1N  3:1N
+
+lock 063 | 6 plates | untrained
+  init  [3, -3, -1, 3, -3, 3]
+  conn  0:2I,3I,5I  1:2N,4N,5N  3:1I,5N  5:4N
+
+lock 064 | 5 plates | untrained
+  init  [-3, 0, -2, -3, -3]
+  conn  0:3I  1:3N  2:0I,3N  4:0I
+
+lock 065 | 6 plates | untrained
+  init  [-1, 3, -3, 0, 0, 1]
+  conn  0:1I,3I,4N  1:4I  2:0N,3I,4N  3:4N,5I
+
+lock 066 | 5 plates | untrained
+  init  [1, -3, -1, 0, -3]
+  conn  0:1I  1:0I,3N,4N  2:3I  3:0N,1N  4:1N,2N,3N
+
+lock 067 | 4 plates | untrained
+  init  [3, 3, 2, 0]
+  conn  0:1N,2I  2:0I,3I  3:0I
+
+lock 068 | 5 plates | untrained
+  init  [-3, 3, -1, 1, -1]
+  conn  0:1N,4N  1:2N,4N  2:3I,4N  3:4N
+
+lock 069 | 4 plates | untrained
+  init  [1, 3, 3, 3]
+  conn  0:2I  2:1I  3:0N,1I,2I
+
+lock 070 | 6 plates | untrained
+  init  [3, 0, 1, 2, -3, -2]
+  conn  0:1N  1:0I,3N,4I  2:1I,4N  4:1I,3N
+
+lock 071 | 6 plates | untrained
+  init  [-3, 3, -3, -1, 0, 3]
+  conn  1:0N,4I  2:5I  3:0N,1N  4:1I,2N  5:0I,1I
+
+lock 072 | 4 plates | untrained
+  init  [-3, 2, 3, 3]
+  conn  1:2I,3N  2:0N,3N  3:0N
+
+lock 073 | 6 plates | untrained
+  init  [0, -3, 3, 1, 1, 2]
+  conn  1:2N,4I  2:3N,5I  3:1I,4I  5:3N
+
+lock 074 | 6 plates | untrained
+  init  [-1, -3, 0, 1, -3, -3]
+  conn  0:2I,5N  1:0N  2:5N  3:2I  4:1I,2I
+
+lock 075 | 7 plates | untrained
+  init  [0, -2, -3, 3, 3, 2, 3]
+  conn  0:4N  1:5N  3:1N,4N,6I  4:3I,6I  6:1N
+
+lock 076 | 5 plates | untrained
+  init  [3, -1, -2, -1, 3]
+  conn  0:1I,2N  1:0I,3N,4I  3:1I  4:0I,3N
+
+lock 077 | 6 plates | untrained
+  init  [3, 1, 3, 2, -3, 1]
+  conn  0:1N,2N  1:2N,5N  2:1N  3:0I  4:5N  5:2I
+
+lock 078 | 6 plates | untrained
+  init  [3, 3, 2, -2, -2, -1]
+  conn  0:3N  1:4I  2:1I,4N  3:0I,1N  4:0N,1I  5:1N
+
+lock 079 | 4 plates | untrained
+  init  [-3, -3, -1, -3]
+  conn  1:2I,3I  2:0N,1N,3I  3:0I
+
+lock 080 | 6 plates | untrained
+  init  [1, 2, 3, 3, -2, -3]
+  conn  0:1N,3N  1:5I  3:0I,4N  4:0N,2N  5:1I,3I,4I
+
+lock 081 | 5 plates | untrained
+  init  [3, 3, 3, 1, 0]
+  conn  0:2I  1:0I,3I  2:0I,1N,3I  3:1N,2I,4I  4:1I
+
+lock 082 | 6 plates | untrained
+  init  [3, 3, 3, -1, 2, -1]
+  conn  1:0I,5N  2:4I,5N  3:4N  4:0I,1I,5N
+
+lock 083 | 6 plates | untrained
+  init  [-3, -1, 0, 1, -3, -2]
+  conn  1:4I  2:0I  3:0N,4N  4:0N,1I,2I,3N,5I  5:2I
+
+lock 084 | 5 plates | untrained
+  init  [3, -3, -2, -3, 2]
+  conn  0:2N,4N  2:0N,1I,3I,4I  3:0N  4:0I,3I
+
+lock 085 | 6 plates | untrained
+  init  [-2, -2, -3, 3, -3, -1]
+  conn  1:3N,4I  2:3N  3:1N,2I  4:3I,5I  5:0I,1I,2I
+
+lock 086 | 7 plates | untrained
+  init  [1, 3, -2, 3, 0, 2, 3]
+  conn  1:2N,3I  2:0I,1N,3N,4I,6N  4:6N  6:1I,3I
+
+lock 087 | 5 plates | untrained
+  init  [-2, 3, 3, 3, 3]
+  conn  0:1N,3I  1:3N,4I  2:0N,1N,3I,4I  4:3I
+
+lock 088 | 6 plates | untrained
+  init  [2, -3, -2, -1, -1, 0]
+  conn  0:1N,2I  1:2I,4I  2:0N  3:1I  5:2N
+
+lock 089 | 6 plates | untrained
+  init  [3, 1, 2, 1, 2, -2]
+  conn  0:1I,2N  1:2N,4I,5N  2:3I  4:0I,1N,5N
+
+lock 090 | 6 plates | untrained
+  init  [0, 1, 1, 0, 2, 3]
+  conn  0:3I,4N,5N  2:4N,5I  3:0N  5:0N,1I,2I
+
+lock 091 | 6 plates | untrained
+  init  [3, -1, -3, -2, -2, 3]
+  conn  1:2N  2:0N,1I,5N  3:0N,1N,4N  5:0I,1I,3I
+
+lock 092 | 5 plates | untrained
+  init  [3, 2, 1, 3, -2]
+  conn  0:2N,3I,4I  1:2N  2:0N,4I  3:2N  4:2N
+
+lock 093 | 6 plates | untrained
+  init  [-3, 2, 3, 1, -1, -2]
+  conn  1:2I,5I  2:1I  4:3I,5I  5:2N,3N,4N
+
+lock 094 | 5 plates | untrained
+  init  [3, 1, 2, -2, -2]
+  conn  0:3N  2:0I  3:1N,2N,4N  4:0I,2N,3I
+
+lock 095 | 5 plates | untrained
+  init  [-3, -1, -3, 3, -1]
+  conn  1:0N  2:0I,1I,4N  3:0N,1I,2N,4I  4:1I
+
+lock 096 | 7 plates | untrained
+  init  [0, 3, -3, 3, 2, 2, 0]
+  conn  0:6I  1:2N,3N  2:3I,4N  3:4N,6I  4:5I  6:1I,2I
+
+lock 097 | 6 plates | untrained
+  init  [3, 1, -1, -2, 3, 1]
+  conn  0:3N  1:4I  2:5I  3:5I  4:2N  5:1I,3I
+
+lock 098 | 6 plates | untrained
+  init  [-2, 2, -3, -3, 0, 1]
+  conn  1:5I  2:0N,1N,5N  3:2I,4N  5:2N,3I,4I
+
+lock 099 | 6 plates | untrained
+  init  [-2, 3, -3, 2, 3, -3]
+  conn  0:1I  2:0I,4N,5N  3:4I,5I  5:1N,4I
+
+lock 100 | 6 plates | untrained
+  init  [2, -2, 2, -2, -1, 3]
+  conn  0:2I  1:2N  2:0I,1N  3:0I  5:0I,1I,2I,3I,4I
+
+lock 101 | 5 plates | untrained
+  init  [1, -2, -2, -3, 3]
+  conn  0:1I  1:3I,4N  2:3I,4N  3:0I,2I,4N  4:0N,1I
+
+lock 102 | 6 plates | untrained
+  init  [1, 1, -1, 3, 0, 1]
+  conn  0:3I  1:4I,5I  2:0N  3:4I  4:2I,3I  5:3I
+
+lock 103 | 6 plates | untrained
+  init  [-3, -3, -2, -2, 2, 1]
+  conn  0:4N,5I  1:0I,3I,4N,5I  3:2N  4:1N,2N,3I
+
+lock 104 | 6 plates | untrained
+  init  [-2, -1, 0, 3, -3, -1]
+  conn  0:4I  3:0N,1I,2I  4:1N  5:4I
+
+lock 105 | 6 plates | untrained
+  init  [3, -2, 3, 2, -1, 1]
+  conn  0:3I  2:0I,1N,4N  3:0N,2I,5N  5:0I,3N
+
+lock 106 | 6 plates | untrained
+  init  [-3, 1, -2, 2, 3, 1]
+  conn  0:5N  1:2N,3N,4I,5I  2:0I  4:3N  5:4I
+
+lock 107 | 5 plates | untrained
+  init  [3, 2, -3, -1, 2]
+  conn  0:3N  1:2N  2:0N,1N  3:0N,1I  4:0I,1I,2N,3N
+
+lock 108 | 5 plates | untrained
+  init  [-1, 2, -2, -3, 0]
+  conn  0:1N,3I,4I  1:4I  3:1N,2I  4:0N,1N
+
+lock 109 | 6 plates | untrained
+  init  [-1, -3, 3, -1, -2, 3]
+  conn  0:4I  1:0N,2I,3I  2:0I,3N,5I  3:1N,5N  5:4N
+
+lock 110 | 7 plates | untrained
+  init  [2, 1, 2, 3, -3, 1, 3]
+  conn  0:1N,6N  1:6N  2:0N,3I  3:0I,6N  4:0N  5:6N  6:1I
+
+lock 111 | 6 plates | untrained
+  init  [0, -3, -2, 1, 0, -3]
+  conn  2:0N,3I,5I  3:0N,2N  4:2I,3I  5:1I,3N
+
+lock 112 | 6 plates | untrained
+  init  [-2, -3, -3, -3, -2, 1]
+  conn  0:5N  2:0I,5N  3:5I  4:0I,1I,5I
+
+lock 113 | 5 plates | untrained
+  init  [-3, -3, 0, -2, -3]
+  conn  0:1I  2:0N,1N  4:0I,2N,3N
+
+lock 114 | 5 plates | untrained
+  init  [2, 3, 0, 3, -2]
+  conn  0:4I  1:0I,2N,3I  2:0I  3:2N
+
+lock 115 | 5 plates | untrained
+  init  [2, -2, 3, 2, 2]
+  conn  0:2I,3I,4N  1:2N,3I,4I  2:3I  3:2I,4I  4:3I
+
+lock 116 | 5 plates | untrained
+  init  [-1, 2, -3, -3, -3]
+  conn  0:1I,3N  1:0I,4N  3:1I  4:1N,2N,3N
+
+lock 117 | 5 plates | untrained
+  init  [-1, -3, 1, -3, 2]
+  conn  0:1I,3I,4N  2:1N  3:0I,2N  4:0N,1N,2I,3N
+
+lock 118 | 6 plates | untrained
+  init  [3, 3, 1, 2, 3, 3]
+  conn  0:1I  3:0N,1I  5:1I,2I,3N
+
+lock 119 | 6 plates | untrained
+  init  [3, 3, -3, -3, -2, -3]
+  conn  1:0N  2:0I,4I  3:0I,1I  4:3I  5:0I,1I
+
+lock 120 | 6 plates | untrained
+  init  [3, 1, -3, 1, -3, 0]
+  conn  0:5N  1:2N,5N  3:0I,1I  4:1I  5:0N,1I,2N
+
+lock 121 | 6 plates | untrained
+  init  [3, -1, -2, 2, -3, 2]
+  conn  0:1N,4N  1:4I  2:1N,4I,5I  4:2N,5N  5:2N,3I
+
+lock 122 | 5 plates | untrained
+  init  [-1, 0, 1, 3, 3]
+  conn  2:0I  3:0N,2N,4I  4:0N,1I,2I
+
+lock 123 | 6 plates | untrained
+  init  [0, 2, 3, 3, -3, 1]
+  conn  0:3I  1:0I  2:5I  3:5I  4:0N  5:0I,1N
+
+lock 124 | 5 plates | untrained
+  init  [-1, 0, 0, -3, -3]
+  conn  0:2N,4I  1:0I  2:4N  4:0I,1N,3I
+
+lock 125 | 6 plates | untrained
+  init  [3, 0, -3, -3, -2, 3]
+  conn  1:5N  2:0N,3N,4I  3:4I,5N  4:1I
+
+lock 126 | 5 plates | untrained
+  init  [1, 2, 3, -1, -3]
+  conn  0:3N,4N  1:0N  2:0I,4N  3:1I  4:1I
+
+lock 127 | 4 plates | untrained
+  init  [-3, -3, -2, -3]
+  conn  0:1I,2I,3N  1:2I  3:0I
+
+lock 128 | 5 plates | untrained
+  init  [0, 2, 0, 3, -3]
+  conn  0:1I,2I,3I  1:0I,2N,3N,4N  2:4I  3:0I  4:3I
+
+lock 129 | 6 plates | untrained
+  init  [-3, 3, 1, -3, 0, -3]
+  conn  1:0I,3I,4N  2:3N  3:0I,5I  4:1I,3I,5I  5:4I
+
+lock 130 | 5 plates | untrained
+  init  [3, 3, -1, 1, 0]
+  conn  1:0I  2:1N,4N  3:0I,1I,2N  4:1I,2I,3I
+
+lock 131 | 5 plates | untrained
+  init  [3, 2, -3, 0, 2]
+  conn  0:1I,3N,4I  1:2N,4I  2:1I,3N,4N  3:0I  4:3I
+
+lock 132 | 6 plates | untrained
+  init  [3, 0, -3, 3, -1, -3]
+  conn  0:5N  1:3I  2:0N  3:5I  4:0N  5:0I,1N,2I,4I
+
+lock 133 | 6 plates | untrained
+  init  [1, 2, -1, 3, 2, 3]
+  conn  0:5I  1:0N,2N,4N  2:0I,4N,5I  3:1I  4:3I  5:1N
+
+lock 134 | 6 plates | untrained
+  init  [-2, -3, -2, -3, -1, 2]
+  conn  0:2I  1:3N  2:3I,5N  3:1N,4N  4:5I  5:0N,1N,3I
+
+lock 135 | 5 plates | untrained
+  init  [2, 2, 3, 0, 1]
+  conn  0:1N  1:0I,4I  2:4I  4:0N,2I,3I
+
+lock 136 | 6 plates | untrained
+  init  [2, -3, 1, 1, -2, 3]
+  conn  0:3I  1:0I,3I  2:1I,3I  4:1I,2I  5:4N
+
+lock 137 | 4 plates | untrained
+  init  [1, 3, 3, -3]
+  conn  1:0N,2I,3I  2:1I  3:0N,2I
+
+lock 138 | 6 plates | untrained
+  init  [3, 3, 0, -3, 2, -3]
+  conn  3:0N  4:0I  5:0N,3I
+
+lock 139 | 6 plates | untrained
+  init  [-3, 0, 2, -3, 0, -3]
+  conn  0:4I  1:2N  2:0N,1N,3N  3:1I  5:3I,4I
+
+lock 140 | 5 plates | untrained
+  init  [1, 3, 3, -1, 3]
+  conn  0:1I,2I,3N,4I  2:1N,4I  4:1N
+
+lock 141 | 5 plates | untrained
+  init  [3, -3, 0, -3, 3]
+  conn  0:2I  1:0N  3:0N,1I,4I  4:0I,2N,3N
+
+lock 142 | 6 plates | untrained
+  init  [-2, 1, 2, -2, 2, 3]
+  conn  2:0N  3:1I,5N  4:0I,2I,3N,5I  5:0N,2N
+
+lock 143 | 6 plates | untrained
+  init  [2, 3, 2, 3, 3, 0]
+  conn  0:1N,4I  1:2I,4N  2:0N,1N,3I,4N  3:4I  4:1N
+
+lock 144 | 5 plates | untrained
+  init  [2, 3, 3, -3, -2]
+  conn  0:1N,2I,3N,4I  1:3N  2:1N,3N  4:0N,1N,3N
+
+lock 145 | 6 plates | untrained
+  init  [0, 3, 1, -2, 1, 2]
+  conn  1:2I,4N  2:1I  4:1I,5I  5:0N,1N,2I,3I,4N
+
+lock 146 | 5 plates | untrained
+  init  [-1, 1, 3, 2, 3]
+  conn  1:3I  2:4I  3:2I  4:0I,1I,2I
+
+lock 147 | 6 plates | untrained
+  init  [-3, 1, -3, 2, 1, 0]
+  conn  0:2I,5I  1:5I  2:3I,4N,5I
+
+lock 148 | 5 plates | untrained
+  init  [2, -2, 3, 1, 2]
+  conn  0:1N,2I  1:0I,2N,4N  2:1I,4I  4:2I
+
+lock 149 | 6 plates | untrained
+  init  [2, 3, -3, -1, -1, -2]
+  conn  0:1N,2I,3I,4N  4:3I,5I  5:0N,3N,4N
+
+lock 150 | 5 plates | untrained
+  init  [3, 0, -3, 1, 2]
+  conn  0:1I  1:0I,3N  2:4N  3:1N,2N,4N  4:0I,3N
+
+lock 151 | 6 plates | untrained
+  init  [2, -2, -3, 1, -1, 2]
+  conn  0:1N,3I,5I  1:4I  2:3I,4N  3:4I  4:2I  5:3N
+
+lock 152 | 6 plates | untrained
+  init  [-3, -2, 1, 3, 1, -1]
+  conn  0:2N,5I  1:4N  2:0I,1N,4I,5N  4:0N,2N
+
+lock 153 | 6 plates | untrained
+  init  [-3, -1, 0, 0, -2, -2]
+  conn  0:1I  1:0I,2I  2:3I  3:0I  4:1I  5:1I
+
+lock 154 | 6 plates | untrained
+  init  [-1, -1, 1, 3, 3, 0]
+  conn  0:2I  3:0I,1I  4:0I,2N,3I  5:3I
+
+lock 155 | 6 plates | untrained
+  init  [-3, 1, 2, 3, -3, 3]
+  conn  0:2I  1:0N,4I  3:1N,2I  4:1I,3I  5:1I,4I
+
+lock 156 | 5 plates | untrained
+  init  [1, 1, -1, 3, 3]
+  conn  0:1I,4I  1:2N,3N,4I  2:0N,4N  3:0I  4:1N
+
+lock 157 | 5 plates | untrained
+  init  [-2, 3, 3, -3, -3]
+  conn  0:2N,4N  1:0N,2I,3I,4I  3:0N,1N,2N,4N
+
+lock 158 | 5 plates | untrained
+  init  [-2, -3, 1, -1, 2]
+  conn  0:2I,3I,4N  1:0I,2I,3I,4I  3:1I,2I  4:3N
+
+lock 159 | 6 plates | untrained
+  init  [-3, -2, 1, 2, -3, 3]
+  conn  0:4N  1:0I,2N  2:0N,5I  5:0N,3I,4I
+
+lock 160 | 6 plates | untrained
+  init  [-3, -1, 2, 3, 3, 1]
+  conn  0:1I,5N  2:0I  3:0I,2I,5N  5:4N
+
+lock 161 | 6 plates | untrained
+  init  [3, 0, 2, 2, -2, -2]
+  conn  0:2I,5I  1:3N,4I,5I  2:4N,5I  4:1I  5:1I,3N
+
+lock 162 | 6 plates | untrained
+  init  [2, -3, 3, 0, 3, -2]
+  conn  1:0I,2N,3I  2:1N  3:0I,1N,4N  4:0N,3I  5:1N
+
+lock 163 | 6 plates | untrained
+  init  [3, -3, -2, -2, -1, 0]
+  conn  0:2I,3N,4N  1:0N,5N  2:1N,5N  4:5I  5:1I,4N
+
+lock 164 | 5 plates | untrained
+  init  [3, -1, 3, -1, 3]
+  conn  1:0I,2N,3N,4I  2:3I  3:1I,2I  4:2I
+
+lock 165 | 4 plates | untrained
+  init  [-3, -3, 0, -3]
+  conn  0:1I,3I  1:2I,3I  2:0I,1N
+
+lock 166 | 4 plates | untrained
+  init  [-3, 2, 3, 0]
+  conn  0:1I,2N,3I  2:3N  3:0I,1I
+
+lock 167 | 6 plates | untrained
+  init  [3, -3, 2, -2, -1, 3]
+  conn  0:4N  2:1N,3I  3:4N  4:0I,2N  5:0I
+
+lock 168 | 5 plates | untrained
+  init  [0, 3, -2, 3, 3]
+  conn  0:1N,2N,3I,4I  1:0I,3N  2:1I  3:4I  4:2I,3I
+
+lock 169 | 5 plates | untrained
+  init  [-1, -3, 3, -1, -3]
+  conn  0:3N,4N  1:0N,2N,3I,4I  2:1N,3I,4N  3:1N
+
+lock 170 | 5 plates | untrained
+  init  [-3, -3, 1, 3, 1]
+  conn  0:4I  1:2N  2:4N  3:0N,1I,2I,4N  4:0I,1N,3N
+
+lock 171 | 6 plates | untrained
+  init  [3, 3, -2, -2, 2, 3]
+  conn  0:4I  1:2N  2:0I,3I  3:4I  4:0N,5N  5:1I,3I
+
+lock 172 | 6 plates | untrained
+  init  [3, -3, 1, 1, 2, 1]
+  conn  0:3I,5I  1:3N,5N  4:0I,5I  5:3N
+
+lock 173 | 6 plates | untrained
+  init  [2, 0, -3, 3, -3, 3]
+  conn  0:1I,3I,4N,5N  2:3I,5I  3:0I,2I  4:5I
+
+lock 174 | 5 plates | untrained
+  init  [0, -3, 0, 1, -3]
+  conn  0:4I  1:3N  2:0N,3N  3:0N,1I  4:0I,3I
+
+lock 175 | 4 plates | untrained
+  init  [0, -2, 3, -3]
+  conn  0:3I  1:2N,3I  2:3N  3:0N,2N
+
+lock 176 | 6 plates | untrained
+  init  [-1, 1, 3, 3, -2, -2]
+  conn  0:1I,3I  1:5I  2:3I  3:0I,1I,2I,4N  4:0I  5:4I
+
+lock 177 | 5 plates | untrained
+  init  [1, 3, 3, 3, -1]
+  conn  0:3I,4I  1:4I  2:0I  3:4I  4:0N,2I
+
+lock 178 | 6 plates | untrained
+  init  [3, -2, 2, 2, 1, 3]
+  conn  0:1N,2I,4I  1:4N  3:0I  4:3I
+
+lock 179 | 6 plates | untrained
+  init  [-2, -1, 3, 2, 3, -2]
+  conn  0:4N  2:5N  3:0N,1N,4I  4:0I,5N  5:0I
+
+lock 180 | 6 plates | untrained
+  init  [-3, 2, -2, -3, 1, -2]
+  conn  0:3I,4N  1:0N,2I,3N  2:0I,3N,4I  5:3I,4N
+
+lock 181 | 6 plates | untrained
+  init  [2, -3, -1, -2, -1, -3]
+  conn  0:2N,3I  1:4N  2:0I,1I,3I  4:0I  5:1I,2N,4N
+
+lock 182 | 5 plates | untrained
+  init  [1, 0, 3, 1, 2]
+  conn  0:2I,4I  1:2I  3:1N  4:2I,3N
+
+lock 183 | 6 plates | untrained
+  init  [-1, 3, 0, 2, 1, -3]
+  conn  0:2N  1:0I,5N  2:3N,4N  3:0I  4:5I  5:2I,3N,4N
+
+lock 184 | 6 plates | untrained
+  init  [3, 0, 2, 1, 3, -3]
+  conn  2:3N,4I  3:1N  4:1I,2N,5N  5:0N,4N
+
+lock 185 | 6 plates | untrained
+  init  [-2, -3, -1, 2, -1, -3]
+  conn  0:2I,3N  1:2N  3:2N,5N  4:2I,5N  5:0I,4I
+
+lock 186 | 4 plates | untrained
+  init  [3, 3, -3, -2]
+  conn  1:0I,2N,3I  2:0N,1N  3:2N
+

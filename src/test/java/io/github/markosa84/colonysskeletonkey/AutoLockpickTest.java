@@ -345,14 +345,30 @@ class AutoLockpickTest {
 
     @Test
     void theBannerSaysWhereItWillLookAndWhatItWillType() {
-        String banner = Stdout.capturing(() -> AutoLockpick.printBanner("other.exe", "system"));
+        String banner = Stdout.capturing(() -> AutoLockpick.printBanner("other.exe", "system", 124, 0));
 
         assertTrue(banner.contains("any resolution"), banner);
+        assertTrue(banner.contains("124 lock"),
+                "the player should know how many locks are already remembered: " + banner);
         assertTrue(banner.contains("system"), "the DPI awareness obtained belongs in a bug report");
         assertTrue(banner.contains("other.exe"),
                 "the banner must name the process the gate waits for: " + banner);
         assertTrue(banner.contains("F8"), banner);
         assertTrue(banner.contains(AutoLockpick.version()), "the build belongs in every report: " + banner);
+        assertFalse(banner.contains("shared by two chests"),
+                "with no ambiguous key there is nothing to say about them: " + banner);
+    }
+
+    /**
+     * Two chests can start at the same offsets, and then the catalogue cannot name either from them.
+     * That only ever grows, and it silently costs recall, so the banner says so rather than leaving
+     * the player wondering why a lock he has opened before is being learned again.
+     */
+    @Test
+    void theBannerSaysHowManyStartingPositionsTwoChestsShare() {
+        String banner = Stdout.capturing(() -> AutoLockpick.printBanner("other.exe", "system", 124, 3));
+
+        assertTrue(banner.contains("3 starting position(s) are shared by two chests"), banner);
     }
 
     // -- the run log header ------------------------------------------------------------------------

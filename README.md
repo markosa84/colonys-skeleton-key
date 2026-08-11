@@ -87,6 +87,14 @@ experiment, choosing its probes so that they cannot strain the pick where that i
 and it never resets the lock, because a reset just restores the blockage it is trying to escape.
 [`docs/INTERNALS.md`](docs/INTERNALS.md) is the long version, with all the measurements.
 
+**It also remembers.** A chest's lock is the same every time you meet it, and the way a lock looks the
+moment you open it almost always identifies it — so the tool ships knowing 186 locks and adds every one
+you open to that. Meet a lock it knows and there is nothing to work out: it just opens it, with no
+experimenting and no risk to the pick. That includes the lock you were on a minute ago, so reloading a
+save and trying again costs nothing. Now and then two chests do start out looking the same; it keeps
+checking as it goes, so one it mistakes that way is dropped at the first surprise and learned the
+normal way instead.
+
 ## Build it yourself
 
 You need **JDK 25** (any distribution) and nothing else — the app has zero dependencies.
