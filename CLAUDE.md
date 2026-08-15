@@ -45,7 +45,7 @@ goes in one of the first three.
 
 # Just the tests (~3 min; includes the 34-frame calibration gate, the live-failure regression
 # frames, the 21-frame 7-plate census, the 133-frame resolution sweep, the 7-frame HDR corpus, the
-# 4-frame dark 1440p corpus, the 7p-strip-off-plate frame and a sample of the 186-lock solve
+# 4-frame dark 1440p corpus, the 7p-strip-off-plate frame and a sample of the 203-lock solve
 # corpus; no game, no display)
 & .\gradlew.bat test --console=plain
 
@@ -54,7 +54,7 @@ goes in one of the first three.
 & .\gradlew.bat test --console=plain --tests '*LockReaderTest'
 & .\gradlew.bat test --console=plain --tests '*LockSolverTest.plansUseTheFewestSlidesPossible'
 
-# The SESSION's gate, and the only honest way to judge a change to discovery: all 186 real locks
+# The SESSION's gate, and the only honest way to judge a change to discovery: all 203 real locks
 # from the bundled catalogue, at all three lockpicking levels, through the real LockSession against
 # FakeGame. Prints strains/plays/give-ups per plate count and per level, plus what recall saves.
 # ~15 minutes, which is why `test` runs only a fixed sample of the same corpus (LockCorpusTest).
@@ -203,7 +203,7 @@ connections and the game's real strain/break/reset rules.
   WALLCLOCK to speed anything up**; the real win is F8 not resetting.
 
   **`ConnectionPrior`** — how likely a slide is to strain, before anything is known about the plate.
-  Built from the 186-lock corpus (see "What the solve history measures"), it answers
+  Built from the 203-lock corpus (see "What the solve history measures"), it answers
   `strainRisk(state, plate, dir, knownDrags)` so `LockSession.gamble` can rank *(plate, direction)*
   by a number instead of by "fewest plates at an end". Nothing is ever *concluded* from it — it
   orders candidates, and the lock still says what happened.
@@ -649,33 +649,38 @@ plate hides nothing there; pinned by `LockSessionTest`.)
 direction, then stuck, never a retry), the refusal memory across an UNTRAINED break-reset, model
 self-correction after a lying observation, and the five-pick give-up.
 
-### What the solve history measures (186 real locks — measured, don't re-derive)
+### What the solve history measures (203 real locks — measured, don't re-derive)
 
-`captures/lock-history.txt` was write-only until 1.6: **211 solved runs over 186 distinct chests**,
-every one from an **untrained** character (15 broken picks say so outright and none says otherwise).
+`captures/lock-history.txt` was write-only until 1.6: **229 solved runs over 203 distinct chests**,
+every one from an **untrained** character (20 runs broke a pick and so record the level in their
+header; none records anything else, and a run that broke nothing saw nothing and says nothing).
 Parsing and replaying it is where every number below comes from, and `tools/LockStats.java`
-regenerates them all. The recorded `W/S/A/D` streams **replay exactly**: 209 of 211 land on the
-all-zero goal, 190 of them under any skill model and 19 only once the untrained break-reset is
+regenerates them all. The recorded `W/S/A/D` streams **replay exactly**: 227 of 229 land on the
+all-zero goal, 205 of them under any skill model and 22 only once the untrained break-reset is
 simulated — which is how the corpus's skill was independently confirmed. (Two runs fit no model, both
 from before 2026-08-05; a pick that arrives already worn breaks early and explains it.) So the corpus
 is a faithful benchmark, not a log — and re-run that replay after any change that can write a model,
-because it is what would catch a run recording rows it never observed.
+because it is what would catch a run recording rows it never observed. **The replay is a throwaway
+harness, not a committed one** — press the keys against `LockSolver.applyMove` from the recorded
+`init`, W/S clamped, two strains breaking the pick and resetting the puzzle; see AGENTS.md,
+"Throwaway harnesses go in the scratchpad".
 
 | Finding | Number |
 | --- | --- |
-| `(plate count, offsets at F8)` → connections | **not quite a bijection — 1 collision in 186**, and see below |
-| `P(p drags q)` | 0.324 (1509 of 4654 ordered pairs) |
-| …by distance and by plate position | **flat**: 0.33/0.32/0.33/0.32, out-degree 1.2–1.8 everywhere |
-| Connection type | **55.4% INVERTED** |
-| Reciprocity | 0.268 vs 0.324 if independent — mildly *anti*-reciprocal |
-| **Connections per lock** | **never above 10**: 4p 4–6, 5p 5–10, 6p **4**–10, 7p 8–10 |
-| Fully isolated plates | 14 of 1019 (29 expected if in/out degree were independent) |
-| Starting offsets | −3 is 20.8%, +3 is 22.8%; every other offset 10–12% |
-| Plates at an end when a real strain happened | **1 → 33.8%**, 2 → 47.5%, 3 → 15.8%, 4 → 2.9% |
+| `(plate count, offsets at F8)` → connections | **not quite a bijection — 1 collision in 203**, and see below |
+| `P(p drags q)` | 0.324 (1657 of 5114 ordered pairs) |
+| …by distance and by plate position | **flat**: 0.33/0.33/0.32/0.32, out-degree 1.2–1.8 at every position of every 4/5/6-plate lock |
+| Connection type | **54.7% INVERTED** |
+| Reciprocity | 0.264 vs 0.324 if independent — mildly *anti*-reciprocal |
+| **Connections per lock** | 4p 4–6, 5p 5–10, 6p **4–11**, 7p 8–10 |
+| Fully isolated plates | 16 of 1116 (32 expected if in/out degree were independent) |
+| Starting offsets | −3 is 21.0%, +3 is 22.9%; every other offset 10–12% |
+| Plates at an end when a real strain happened | **1 → 32.6%**, 2 → 46.6%, 3 → 16.9%, 4 → 3.4% |
 
-**Every figure above moved by under a percentage point when the corpus grew by half** — which is
-itself a finding: the generator has no structure that a larger sample was going to reveal. Two claims
-did *not* survive, and both were sampling artefacts stated as rules:
+**Every figure above moved by under a percentage point when the corpus grew by half, and by hundredths
+across each batch of locks since** — which is itself a finding: the generator has no structure that a
+larger sample was going to reveal. The connection ranges have not moved at all in two passes. Three
+claims did *not* survive, and all three were sampling artefacts stated as rules:
 
 - **The recall key is not a bijection.** Two four-plate chests both start at `[3, 3, -3, -2]`. See
   "The offsets identify the lock — nearly" below, and the dead end.
@@ -684,12 +689,18 @@ did *not* survive, and both were sampling artefacts stated as rules:
   data. `ConnectionPrior` had a floor of `n` resting on that; it is gone. (It had never fired — the
   measured mean is above `n` at every plate count — which is its own small lesson: a guard rail that
   cannot trip is a claim, not a safeguard.)
+- **…and it can have more connections than the corpus ceiling.** "Never above 10" held over 186 locks
+  and fails at 190: a six-plate chest has **eleven** (`[-3, -3, 3, -3, -2, 1]`), and it too replays
+  cleanly. `ConnectionPrior` had a `MAX_EDGES` ceiling resting on that, and it is gone for exactly the
+  reason the floor was — it could never fire either, since the per-size **mean** it clamps against is
+  strictly inside both bounds and was always the binding term. **Fit the mean, not the range**: two
+  guard rails now, both falsified by the next batch of locks, both provably dead the whole time.
 
 Three things follow, and they are the whole of the 1.6 work:
 
 - **The offsets identify the lock — nearly.** Hence `LockCatalog`: recall the model, skip discovery.
-  Measured over the whole corpus (`gradlew corpus`, untrained): **6192 plays recalled against 7181
-  probed — 13.8% fewer, 172 of 186 locks strictly cheaper — and 0 strains against 153.** The strain
+  Measured over the whole corpus (`gradlew corpus`, untrained): **6893 plays recalled against 7976
+  probed — 13.6% fewer, 188 of 203 locks strictly cheaper — and 0 strains against 174.** The strain
   number is the point; the move saving is uneven, because on some chests every discovery move already
   lay on the solution path. (The sweep reports 2 strains, and both belong to the two chests that share
   a key: those are deliberately *not* recalled, so they pay what probing costs. Every lock recall
@@ -697,9 +708,10 @@ Three things follow, and they are the whole of the 1.6 work:
 
   **But the key is a measurement, not a theorem, and it does collide.** 7⁴ states for the smallest
   lock, and the offsets are not uniform (each end of the track is ~21%, every other position 10–12%),
-  so the effective space is smaller still. Against the 186 locks now bundled, the chance a *new* chest
-  lands on a key already remembered is **1.5% at 4 plates** (15 keys over 16 locks), 0.7% at 5, 0.1%
-  at 6 — and it grows linearly as the player's own history fills up. It has happened, and the shipped
+  which shrinks the effective alphabet to `1/Σp²` ≈ **6.25** positions per plate. So against `K` keys
+  already remembered, a *new* chest collides with probability about `K / 6.25ⁿ`: with the 203 locks now
+  bundled that is **1.0% at 4 plates** (15 keys over 16 locks), 0.8% at 5, 0.2% at 6 — and it grows
+  linearly as the player's own history fills up. It has happened, and the shipped
   catalogue now contains the pair: two four-plate chests at `[3, 3, -3, -2]`, `lock 014` and the one
   that exposed it. `LockCatalog` marks that key ambiguous and recalls neither; both are still named by
   `matching()` off one probed row, and `LockCatalogTest` asserts the whole arrangement against the
@@ -747,21 +759,30 @@ is flat (see the dead end), so there is little left to extract. **The measurable
 recall.** Anything proposed here goes through `gradlew corpus` before and after, or it does not go in.
 
 **A totals table is only comparable against a run over the SAME catalogue.** The corpus grows as locks
-are opened — 124 locks when the table above was measured, 186 now — so a change is argued by running
+are opened — 124 locks when the table above was measured, 203 now — so a change is argued by running
 the sweep twice on the catalogue in the tree, never against a number quoted from an older one.
 
-**The current baseline** (`gradlew corpus`, 186 locks × 3 levels = 558 runs):
+**The current baseline** (`gradlew corpus`, 203 locks × 3 levels = 609 runs):
 
 | | plays | strains | breaks |
 | --- | --- | --- | --- |
-| discovery, from scratch | 17590 | 335 | 56 |
-| recall (untrained) | 6192 vs 7181 probed | 0 (+2 on the shared key) | — |
+| discovery, from scratch | 19374 | 369 | 62 |
+| recall (untrained) | 6893 vs 7976 probed | 0 (+2 on the shared key) | — |
 
-Re-measuring the prior's constants from those 186 locks — the per-size means and the INVERTED split —
-was put through the same two runs and came out **byte-identical, every row of the table**. That is the
-expected result and worth stating: the generator is structureless, so a better estimate of a flat
-distribution reorders almost no gambles. It also means the `n` floor that went with it cannot have
-been doing anything, which is how its removal was known to be safe before the tests confirmed it.
+**Re-measuring the prior's constants has now been done three times, and every time it changed
+nothing.** The first pass (at 186 locks) re-fitted the per-size means and the INVERTED split and came
+back byte-identical, every row of the table. The second (at 190, the pass that also removed the
+`MAX_EDGES` ceiling) was run as a proper control — new constants against the **same 186-lock
+catalogue**, so the constants were the only variable — and reproduced `17590 / 335 / 56` and
+`6192 vs 7181` exactly, to the play. The third (at 203) ran the same control against the **190-lock
+catalogue** and reproduced `18042 / 354 / 60` and `6385 vs 7405`, to the play again — and this time
+the re-fit did move a documented figure, the six-plate gamble going 0.33 → 0.34, without moving a
+single move of the sweep. That is the expected result and worth stating: the generator is
+structureless, so a better estimate of a flat distribution reorders almost no gambles. It also
+confirms what the arithmetic already said — neither the `n` floor nor the `MAX_EDGES` ceiling could
+have been doing anything, which is how each removal was known to be safe before the tests agreed.
+**Run the control that way**: re-fitting the constants and growing the catalogue in one commit means
+neither change can be read off the totals.
 
 ### Cross-file conventions (keep these consistent everywhere)
 
@@ -832,7 +853,7 @@ solver/vision/control/session and the root, and **every class outside `win32` is
 line / 90.9% branch, gated at 94/90 — see "Testing seams" below).
 
 **The session has a corpus of its own now, and it is the reader's frame gate for the other half of the
-tool**: `LockCorpusTest` drives the real `LockSession` against `FakeGame` over the 186 bundled locks at
+tool**: `LockCorpusTest` drives the real `LockSession` against `FakeGame` over the 203 bundled locks at
 all three lockpicking levels, and prints strains/plays/breaks per plate count and per level. `gradlew
 test` runs a fixed, deterministic **sample** of it (every 25th lock plus the ones a full sweep found
 hardest, untrained only) so the suite stays minutes rather than tens of minutes; `gradlew corpus`
@@ -923,7 +944,7 @@ Full numbers, method and spread are in `docs/INTERNALS.md` "Measured timings". T
   slide *count* is near-irreducible — 22 of those 33 are the solution itself, 11 are discovery — so
   a big lock is simply a long run. **Below the animation floor there is nothing left to win without
   giving up the observe-every-move contract** *for a lock the tool has never seen*. For one it has,
-  the discovery third goes away entirely: recall skips it, and the run is exactly the solution (13.9%
+  the discovery third goes away entirely: recall skips it, and the run is exactly the solution (13.6%
   fewer slides over the whole corpus, and every one of those slides was ~320ms of animation).
 - **Capture, not image processing, is the cost.** A full 4K `capture()` is ~79ms; `readState` on it is
   ~8ms. `GameScreen.captureLock()` grabs only the lock's 1300x1120 box (~23ms; enlarging it from
@@ -996,20 +1017,24 @@ centered** (it does not slide with the offset).
 
 ### Dead ends — don't re-derive these
 
-- **Connections have no positional structure. This was measured over 186 real locks and there is
+- **Connections have no positional structure. This was measured over 203 real locks and there is
   nothing there.** The tempting heuristics — "adjacent plates are linked more often", "the front plate
   drags more", "a plate that drags nothing is dragged by everything" — are all flat: `P(p drags q)` is
   0.32–0.33 at distance 1, 2, 3 and 4 alike, and the average out-degree is 1.2–1.8 at *every* plate
-  position of *every* lock size. Do not fit a distance kernel or a per-position weight; there is no
+  position of *every* 4-, 5- and 6-plate lock (the 7-plate sample is six locks and swings wider on
+  nothing). Do not fit a distance kernel or a per-position weight; there is no
   signal to fit — and **growing the corpus by half moved every one of those figures by under a
   percentage point**, which is what "no structure" looks like when you go back and check. What is real
-  is much simpler and is what `ConnectionPrior` uses: the **total** is budgeted (`connections ≤ 10`,
-  no exceptions in the corpus), so the odds sharpen with every row probed — a six-plate lock with
-  eight connections already seen has at most two left over ten unknown pairs, 0.15 rather than 0.32.
-  The only other real skew is the type split (55.4% INVERTED), and its whole effect is that the two
-  directions of one slide differ in risk (**0.33 vs 0.40** on a fresh six-plate lock with three plates
+  is much simpler and is what `ConnectionPrior` uses: the **total** is budgeted around a per-size
+  **mean** (4p 5.6, 5p 8.2, 6p 8.5, 7p 9.3), so the odds sharpen with every row probed — a six-plate
+  lock with eight of its ~8.5 already seen has almost nothing left to spread over ten unknown pairs.
+  The only other real skew is the type split (54.7% INVERTED), and its whole effect is that the two
+  directions of one slide differ in risk (**0.34 vs 0.40** on a fresh six-plate lock with three plates
   parked at one end) — exactly the difference the old "fewest plates at an end" rule could not see.
-  The **lower** end is not a bound to lean on: "at least `n`" held over 124 locks and fails at 186.
+  **Neither end of the observed range is a bound to lean on, and both have now been coded and
+  falsified**: "at least `n`" held over 124 locks and failed at 186; "never above 10" held over 186 and
+  failed at 190 (a six-plate chest with eleven). Both guard rails were also unreachable the whole time,
+  the mean lying strictly inside them. Fit the mean, not the range.
 
 - **A remembered model that strains is a DIFFERENT CHEST, not a trained character — and the whole
   memory has to go, not the row it was caught on.** This is a proof, not a heuristic: training only

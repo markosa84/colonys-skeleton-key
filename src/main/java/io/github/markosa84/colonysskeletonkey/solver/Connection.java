@@ -25,7 +25,7 @@ public record Connection(int target, Type type) {
      *       never strain the pick.</li>
      *   <li>So a remembered row the lock contradicts by having <i>more</i> in it cannot be this chest
      *       at any skill level. It is a different chest whose offsets happen to match: the offsets
-     *       are a measured property of 186 real locks, not a theorem, and they do collide.</li>
+     *       are a measured property of 203 real locks, not a theorem, and they do collide.</li>
      * </ul>
      *
      * <p>Order-insensitive, because nothing in the catalogue's file format guarantees one.

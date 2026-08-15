@@ -8,11 +8,25 @@ Build, run and architecture live in `CLAUDE.md`. Code-level gotchas live in
   a JaCoCo coverage gate** (≥94% line, ≥90% branch, `win32` excluded). A change that stops testing
   something fails the build — raise the floor when coverage rises, never lower it to fit a change.
 
-- **A change to discovery is judged by `gradlew corpus`, not by reasoning about it.** All 186 real
+- **A change to discovery is judged by `gradlew corpus`, not by reasoning about it.** All 203 real
   locks the tool has opened, at all three lockpicking levels, through the real `LockSession` against
   `FakeGame` — it prints strains, plays and breaks and that table is the argument. ~15 minutes, so
   `gradlew test` runs a fixed sample of the same corpus. Record the before and after; two of the
   session's "obvious improvements" only turned out to be improvements because this existed.
+
+- **Folding fresh locks in from `captures/lock-history.txt` is four steps, and skipping any of them
+  ships a stale number.** (1) Regenerate the catalogue — `tools/LockStats.java`, `--assume-skill
+  untrained` because entries written before 1.6 carry no level; the invocation is in CLAUDE.md.
+  (2) **Replay the recorded key streams** against the recorded models before trusting a byte of it:
+  that is the only check that would catch a run writing down a row it never observed, and the harness
+  is a throwaway. (3) Carry the tool's printed figures into `ConnectionPrior`'s constants and into the
+  prose — `ConnectionPriorTest` pins the two risk figures the javadoc quotes, so a constant that moves
+  without its documentation fails the build, on purpose. (4) Re-run `gradlew corpus` and update the
+  baseline table; it is the only honest source for "what recall saves". Expect the measured
+  probabilities to barely move — the generator is structureless — and expect any *bound* you once fit
+  to the range to break. Two have. What does move is the *quoted* figures: at 203 locks the re-fit
+  shifted the six-plate gamble from 0.33 to 0.34 and `ConnectionPriorTest` failed until the javadoc
+  and the docs said so, which is the pin working, not a regression.
 
 - **A user's bug report is a PNG, and the answer is usually in the sidecar next to it.** A failed read
   dumps `captures/<tag>-<stamp>.png` **and** a `.txt` with the viewport, the environment, **the gamma

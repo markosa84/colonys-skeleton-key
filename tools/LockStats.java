@@ -96,7 +96,7 @@ public final class LockStats {
     /**
      * The invariant the whole recall path rests on: the offsets a lock shows at F8 identify its
      * connections. Over the first 124 real chests it held with not one collision - but it is a fact
-     * about the game, not a theorem, and at 186 it no longer does: two four-plate chests both start
+     * about the game, not a theorem, and at 186 it stopped: two four-plate chests both start
      * at {@code [3, 3, -3, -2]}. So a history that breaks it must say so loudly rather than quietly
      * hand the session an ambiguous model. {@code LockCatalog} acts on it too now, refusing a key it
      * knows two chests answer to; this check is what tells you it happened.

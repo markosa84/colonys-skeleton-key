@@ -88,7 +88,7 @@ and it never resets the lock, because a reset just restores the blockage it is t
 [`docs/INTERNALS.md`](docs/INTERNALS.md) is the long version, with all the measurements.
 
 **It also remembers.** A chest's lock is the same every time you meet it, and the way a lock looks the
-moment you open it almost always identifies it — so the tool ships knowing 186 locks and adds every one
+moment you open it almost always identifies it — so the tool ships knowing 203 locks and adds every one
 you open to that. Meet a lock it knows and there is nothing to work out: it just opens it, with no
 experimenting and no risk to the pick. That includes the lock you were on a minute ago, so reloading a
 save and trying again costs nothing. Now and then two chests do start out looking the same; it keeps

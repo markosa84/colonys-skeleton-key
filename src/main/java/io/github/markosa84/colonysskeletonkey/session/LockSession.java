@@ -46,7 +46,7 @@ import io.github.markosa84.colonysskeletonkey.solver.Move;
  *
  * <h2>Locks already opened</h2>
  * None of that is needed for a chest this tool has met before. The offsets a lock shows at F8 nearly
- * always identify it - measured across 186 real chests, with one collision - so {@link KnownLocks}
+ * always identify it - measured across 203 real chests, with one collision - so {@link KnownLocks}
  * is consulted first and, on a hit, the whole model is adopted and the run goes straight to solving.
  * It is a hypothesis, not an assumption: it is taken up only if it opens the lock from where the lock
  * actually is, and every move below still verifies it. See {@link #adopt}.
@@ -67,7 +67,7 @@ import io.github.markosa84.colonysskeletonkey.solver.Move;
  *       move legal before a key is pressed. Costs time, never a pick.</li>
  *   <li><b>Gamble</b> - when neither exists, and then the cheapest gamble on the board:
  *       {@link io.github.markosa84.colonysskeletonkey.solver.ConnectionPrior} costs every unprobed
- *       plate against both directions from what 186 real locks say about how a lock is wired. Toward
+ *       plate against both directions from what 203 real locks say about how a lock is wired. Toward
  *       centre survives as the tie-break, since it still walks plates off the ends.</li>
  *   <li><b>Reposition then gamble</b> ({@link #escalate}) - the last resort, and what keeps a solvable
  *       lock from reporting "stuck". Probing one interior plate can drag another to an end, where its
@@ -560,7 +560,7 @@ public final class LockSession {
      *
      * <p><b>Identity is the other half, and it is not free.</b> That argument says a memory of
      * <i>this chest</i> is safe; it says nothing about whether this is that chest. The key is
-     * {@code (plate count, offsets)} - one collision in 186 real locks, and a property
+     * {@code (plate count, offsets)} - one collision in 203 real locks, and a property
      * of the game rather than a theorem, and with the smallest key space (four plates, 7^4 states
      * skewed hard toward the ends of the track) it does collide. A memory of a <i>different</i> chest
      * is neither superset nor subset, and it can strain. So the run watches for exactly the
@@ -1185,7 +1185,7 @@ public final class LockSession {
     /**
      * Press a key and accept the risk - but the smallest risk available, and as a number rather than
      * a proxy for one. {@link ConnectionPrior} costs out every unprobed plate against every direction
-     * from the offsets on screen, using what 124 real locks say about how many connections a lock has
+     * from the offsets on screen, using what 203 real locks say about how many connections a lock has
      * and which way they run.
      *
      * <p>It replaces "fewest other plates at an end, then toward centre", which could not tell a 34%

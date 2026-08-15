@@ -370,7 +370,7 @@ cheapest-risk-first:
    the ends for some unprobed plate. Their connections are known, so every move is proven legal before
    a key is pressed. This costs time, never a pick — which is exactly the trade we want.
 3. **Gamble** — only when neither of the above exists, and then the *cheapest* gamble available. Every
-   unprobed plate is costed against both directions from what is on screen, using what 186 real locks
+   unprobed plate is costed against both directions from what is on screen, using what 203 real locks
    say about how a lock is wired (below). Only a plate already parked at an end can be pushed off one,
    and each of those is fatal in exactly one of the two ways it could be dragged — so the same slide is
    not equally risky both ways round. On a fresh six-plate lock with three plates parked at one end,
@@ -390,10 +390,10 @@ clear-cut**. The pick was spent either way; this is refusing to throw the receip
 ### 2b. Locks it has met before
 
 A chest's lock does not change, and it turns out that the offsets a lock shows the moment you open it
-almost always identify it: across 186 real chests, only one pair ever showed the same starting
+almost always identify it: across 203 real chests, only one pair ever showed the same starting
 position, and the same chest re-opened showed the same one every time. So the tool ships a catalogue
 of locks already opened, adds every lock you open to it, and when it recognises one it skips learning
-entirely and goes straight to solving. Measured over all 186: **14% fewer moves, and every strain
+entirely and goes straight to solving. Measured over all 203: **14% fewer moves, and every strain
 gone from the locks it recognises.**
 
 Nothing is taken on trust. A remembered wiring is checked before a key is pressed (it has to actually
@@ -468,7 +468,7 @@ All code lives under the base package `io.github.markosa84.colonysskeletonkey`
   `known-locks.txt` are what the tool remembers.
 - `solver/` — the dependency-free domain core: `LockModel`, `Connection`, `Move`, `Cost`,
   `LockSolver` (the connection algebra `applyMove` plus the least-cost search), and
-  `ConnectionPrior` (what 186 real locks say about how a lock is wired, used to cost a gamble).
+  `ConnectionPrior` (what 203 real locks say about how a lock is wired, used to cost a gamble).
 - `vision/` — `Viewport` (the screen size, and the mapping from the calibrated 4K reference
   coordinates onto it), `GameScreen` (every Robot pixel grab: full capture, the fast lock-box
   composite, the pick-counter fingerprint), `LockReader` (pure frame analysis, headless-safe),
@@ -484,7 +484,7 @@ All code lives under the base package `io.github.markosa84.colonysskeletonkey`
 
 Tests mirror the packages under `src/test/java/`, with `FakeGame` (a simulated lock with hidden
 connections and real strain/break/reset rules) driving the session tests. `LockCorpusTest` uses it to
-replay all 186 remembered locks at all three lockpicking levels — the session's equivalent of the
+replay all 203 remembered locks at all three lockpicking levels — the session's equivalent of the
 reader's frame corpus, and the benchmark any change to the learning strategy has to beat
 (`gradlew corpus`; the ordinary test run does a fixed sample of it). Alongside are the labelled frames
 under [`src/test/data/frames/`](src/test/data/frames/) — the 34-frame 4K census, the

@@ -9,8 +9,8 @@ import io.github.markosa84.colonysskeletonkey.solver.Connection;
 /**
  * Locks this tool has opened before, as a lookup the session can consult before it starts probing.
  *
- * <p>Measured over 186 real chests: <b>{@code (plate count, offsets at F8)} very nearly maps
- * one-to-one onto the connections</b> - one collision in 186 - and the same chest re-opened reports
+ * <p>Measured over 203 real chests: <b>{@code (plate count, offsets at F8)} very nearly maps
+ * one-to-one onto the connections</b> - one collision in 203 - and the same chest re-opened reports
  * byte-identical offsets and connections. So the state the lock is in when F8 is pressed is a sound
  * key, and a hit turns a run into a straight solve - measured over that corpus, 14% fewer slides and
  * every one of its strains gone.
