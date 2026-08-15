@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.7.0](https://github.com/markosa84/colonys-skeleton-key/compare/v1.6.0...v1.7.0) (2026-08-15)
+
+
+### Features
+
+* recognise 203 locks, up from 190 ([#19](https://github.com/markosa84/colonys-skeleton-key/issues/19)) ([869f2d0](https://github.com/markosa84/colonys-skeleton-key/commit/869f2d0bcf92e7ecc49e3d0f4963430ac00b9e37))
+
 ## [1.6.0](https://github.com/markosa84/colonys-skeleton-key/compare/v1.5.0...v1.6.0) (2026-08-11)
 
 
