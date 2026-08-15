@@ -87,6 +87,28 @@ Build, run and architecture live in `CLAUDE.md`. Code-level gotchas live in
      interactive hotkey app, so that click is the only smoke test the artifact ever gets. A draft has
      no git tag — the tag appears when you publish.
 
+- **A "chore(main): release 1.0.0" PR appears after every release. It is expected, it is wrong, and
+  merging it would be a mess.** The cause is step 3 above meeting release-please's anchoring: the
+  config sets `"draft": true`, so between merging the release PR and publishing the draft there is a
+  window where the manifest already says the new version but **no tag for it exists**. release-please
+  anchors on the tag matching the manifest's version, finds none, concludes the repo has never been
+  released, and bootstraps an initial release — `1.0.0`, the `simple` release-type default. You can
+  tell it apart from a real proposal at a glance: the CHANGELOG diff is a **from-zero rebuild of the
+  whole history** (features from three releases ago, listed twice), and the compare link points at a
+  tag that does not exist.
+
+  It lingers because the workflow triggers on `push: branches: [main]` and **publishing a release is
+  not a push**, so nothing re-evaluates it. Measured: the placeholder opened 2026-08-11, survived
+  v1.6.0 being published on 08-12, and only corrected itself to `release 1.7.0` on 08-15 when an
+  unrelated `feat:` landed. So it self-heals on the next commit and no version was ever at risk.
+
+  Two things follow. **Never merge a release PR whose title is not the version you mean** — merging
+  this one writes `version.txt` and the manifest back to `1.0.0` and overwrites the CHANGELOG with
+  duplicated history, which then needs three files reverted and probably a tag deleted. And if you
+  want it gone rather than left looking broken, publish the draft (which creates the tag) and then
+  re-run the workflow by hand — `gh workflow run release.yml`, which exists for exactly this — so
+  manifest and tag agree again.
+
 - **Throwaway harnesses go in the scratchpad, not the repo.** The public API covers driving the
   tool (`LockSession`, `Slider`, `LockReader`, `GameScreen` are public); a harness that needs
   package-private members must declare the same package (e.g.
