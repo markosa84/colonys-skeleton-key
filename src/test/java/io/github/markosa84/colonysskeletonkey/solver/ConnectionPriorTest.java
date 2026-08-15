@@ -45,10 +45,11 @@ class ConnectionPriorTest {
 
         assertTrue(left < right, "left " + left + " should beat right " + right);
         // Pinned to the figures the class javadoc and the docs quote, so neither can rot silently -
-        // which is exactly what this caught when the constants were re-measured over 186 locks and
-        // the left-hand figure moved from 0.34 to 0.33. Re-measure both if you touch MEAN_EDGES or
+        // which is exactly what this keeps catching. The left-hand figure went 0.34 -> 0.33 when the
+        // constants were re-measured over 186 locks, held at 190, and came back to 0.34 at 203; the
+        // right-hand one has never moved off 0.40. Re-measure both if you touch MEAN_EDGES or
         // P_INVERTED, and carry the new numbers into the javadoc and CLAUDE.md with them.
-        assertEquals(0.33, left, 0.005);
+        assertEquals(0.34, left, 0.005);
         assertEquals(0.40, right, 0.005);
     }
 
@@ -100,22 +101,26 @@ class ConnectionPriorTest {
         double afterEightSeen = ConnectionPrior.from(6, mostlyKnown).edgeProbability();
 
         assertTrue(afterEightSeen < blind,
-                "eight of at most ten connections are already placed: " + afterEightSeen
+                "eight of the ~8.5 a six-plate lock averages are already placed: " + afterEightSeen
                         + " should be below the blind " + blind);
         assertTrue(blind > 0.2 && blind < 0.45, "the blind prior is the corpus rate: " + blind);
     }
 
-    /** A lock whose probed rows already hold the corpus maximum leaves nothing to expect. */
+    /**
+     * A lock whose probed rows already hold more connections than its size averages leaves nothing to
+     * expect - and expects a negative number of connections nowhere. Real locks do run over the mean:
+     * a six-plate chest with eleven is in the corpus, against a mean of 8.5.
+     */
     @Test
-    void aLockAlreadyAtTheConnectionCeilingExpectsNoMore() {
-        Connection[][] atTheCeiling = new Connection[6][];
+    void aLockAlreadyPastTheCorpusMeanExpectsNoMore() {
+        Connection[][] pastTheMean = new Connection[6][];
         for (int p = 0; p < 5; p++) {
-            atTheCeiling[p] = new Connection[] {
+            pastTheMean[p] = new Connection[] {
                 new Connection((p + 1) % 6, NORMAL), new Connection((p + 2) % 6, NORMAL)
             };
         }
 
-        assertEquals(0, ConnectionPrior.from(6, atTheCeiling).edgeProbability(), 1e-9);
+        assertEquals(0, ConnectionPrior.from(6, pastTheMean).edgeProbability(), 1e-9);
     }
 
     @Test

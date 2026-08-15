@@ -91,7 +91,7 @@ tasks.test {
 }
 
 /**
- * The whole 186-lock corpus, every real chest this tool has opened, at all three lockpicking levels -
+ * The whole 203-lock corpus, every real chest this tool has opened, at all three lockpicking levels -
  * the session's equivalent of the reader's frame gate. It is the benchmark any change to discovery
  * argues against: it prints strains, plays and give-ups per plate count and per level, plus what
  * recall saves.

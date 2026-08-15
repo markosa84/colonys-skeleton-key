@@ -71,7 +71,7 @@
   about recall never sees it.
 
 - **`LockSession` has its own corpus gate now, and any change to discovery must be measured on it.**
-  `gradlew corpus` replays all 186 real locks from the bundled `known-locks.txt` at all three
+  `gradlew corpus` replays all 203 real locks from the bundled `known-locks.txt` at all three
   lockpicking levels through the real session and prints strains/plays/breaks; `gradlew test` runs a
   fixed sample. It exists because the search is chaotic — a change that "obviously" reduces strains
   moved the corpus by 1.4%, and made 5-plate locks slightly *worse*. Record before and after.

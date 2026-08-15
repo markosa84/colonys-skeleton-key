@@ -56,7 +56,8 @@ class LockCorpusTest {
      *
      * <p>Re-chosen from evidence, not memory: the full sweep prints its own costliest list, and three
      * of the five locks that used to sit here are no longer expensive at all. Refresh it whenever
-     * discovery changes shape.
+     * discovery changes shape - and whenever the catalogue grows, since a new chest can displace one:
+     * at 203 locks the last entry changed and the other seven did not.
      */
     private static final List<String> HARD = List.of(
             "[2, -3, -3, 2, -3]",
@@ -66,7 +67,7 @@ class LockCorpusTest {
             "[3, 0, 2, 1, 3, -3]",
             "[-1, -3, 3, -1, -3]",
             "[0, -2, 3, -3]",
-            "[-3, -3, -2, -2, 2, 1]");
+            "[3, -3, -1, 3, -3, 3]");
 
     private static List<LockCatalog.Entry> corpus;
 
