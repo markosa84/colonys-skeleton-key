@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.7.1](https://github.com/markosa84/colonys-skeleton-key/compare/v1.7.0...v1.7.1) (2026-08-15)
+
+
+### Documentation
+
+* explain the "release 1.0.0" PR that follows every release ([#21](https://github.com/markosa84/colonys-skeleton-key/issues/21)) ([bac14fe](https://github.com/markosa84/colonys-skeleton-key/commit/bac14fe8d1aa94e5681e9910f8757be42cc73650))
+
 ## [1.7.0](https://github.com/markosa84/colonys-skeleton-key/compare/v1.6.0...v1.7.0) (2026-08-15)
 
 
